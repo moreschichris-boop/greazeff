@@ -16,25 +16,25 @@ export default async function OwnersPage() {
 
       <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
         {(owners ?? []).map((o) => (
-          <Link key={o.id} href={`/owners/${o.slug}`} className="stat-card group rounded-xl p-5 transition hover:border-teal/60">
-            <div className="flex items-center gap-4">
-              {o.photo_url ? (
+          <Link key={o.id} href={`/owners/${o.slug}`} className="stat-card group rounded-xl p-5 text-center transition hover:border-teal/60">
+            {o.photo_url ? (
+              <div className="relative mx-auto h-48 w-48 overflow-hidden rounded-xl bg-panel ring-2 ring-line group-hover:ring-teal">
                 <Image
                   src={o.photo_url}
                   alt={o.name}
-                  width={64}
-                  height={64}
-                  className="h-16 w-16 rounded-full object-cover ring-2 ring-line group-hover:ring-teal"
+                  fill
+                  className="object-contain object-center"
+                  sizes="192px"
                 />
-              ) : (
-                <div className="ring-2 ring-line group-hover:ring-teal rounded-full">
-                  <SquidMark size={64} />
-                </div>
-              )}
-              <div>
-                <div className="font-display text-xl text-bone">{o.name}</div>
-                {o.team_name && <div className="text-sm text-teal">{o.team_name}</div>}
               </div>
+            ) : (
+              <div className="mx-auto flex h-48 w-48 items-center justify-center rounded-xl bg-panel ring-2 ring-line group-hover:ring-teal">
+                <SquidMark size={120} />
+              </div>
+            )}
+            <div className="mt-4">
+              <div className="font-display text-xl text-bone">{o.name}</div>
+              {o.team_name && <div className="text-sm text-teal">{o.team_name}</div>}
             </div>
           </Link>
         ))}

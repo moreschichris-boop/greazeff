@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { supabase, Owner, Draft, DraftPick, Season } from "@/lib/supabase";
+import { supabase, Owner, Draft, DraftPick, Season, DraftPlayer } from "@/lib/supabase";
 import { teamOrderForRound, ownerForPick, totalPicks } from "@/lib/draft";
 
 export default function DraftBoardPage() {
@@ -10,6 +10,9 @@ export default function DraftBoardPage() {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [owners, setOwners] = useState<Owner[]>([]);
   const [picks, setPicks] = useState<DraftPick[]>([]);
+  const [pool, setPool] = useState<DraftPlayer[]>([]);
+  const [posFilter, setPosFilter] = useState("ALL");
+  const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -47,6 +50,41 @@ export default function DraftBoardPage() {
     return () => { cancelled = true; };
   }, [seasonId]);
 
+  const season = seasons.find((s) => s.id === seasonId);
+
+  useEffect(() => {
+    if (!season) return;
+    let cancelled = false;
+    supabase.from("draft_players").select("*").eq("season_year", season.year).then(({ data }) => {
+      if (!cancelled) setPool(data ?? []);
+    });
+    return () => { cancelled = true; };
+  }, [season?.year]);
+
+  // Realtime: live-update the pool as players get drafted, from any device.
+  useEffect(() => {
+    if (!season) return;
+    const channel = supabase
+      .channel(`draft-players-${season.year}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "draft_players", filter: `season_year=eq.${season.year}` }, (payload) => {
+        setPool((prev) => {
+          if (payload.eventType === "INSERT") {
+            const row = payload.new as DraftPlayer;
+            if (prev.some((p) => p.id === row.id)) return prev;
+            return [...prev, row];
+          }
+          if (payload.eventType === "DELETE") return prev.filter((p) => p.id !== (payload.old as DraftPlayer).id);
+          if (payload.eventType === "UPDATE") {
+            const row = payload.new as DraftPlayer;
+            return prev.map((p) => (p.id === row.id ? row : p));
+          }
+          return prev;
+        });
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [season?.year]);
+
   // Realtime: live-update the board as picks are made and as the draft's
   // current_pick / status changes, from any device.
   useEffect(() => {
@@ -83,6 +121,12 @@ export default function DraftBoardPage() {
   const pickMap = useMemo(() => new Map(picks.map((p) => [p.pick_number, p])), [picks]);
 
   const onClock = draft && draft.status === "in_progress" ? ownerForPick(draft.draft_order, draft.current_pick) : null;
+
+  const available = pool.filter((p) => !p.drafted);
+  const positions = ["ALL", ...Array.from(new Set(available.map((p) => p.position).filter(Boolean) as string[])).sort()];
+  const bestAvailable = available
+    .filter((p) => posFilter === "ALL" || p.position === posFilter)
+    .filter((p) => !search || p.name.toLowerCase().includes(search.toLowerCase()));
 
   if (loading) return <p className="text-mute">Loading...</p>;
 
@@ -129,6 +173,43 @@ export default function DraftBoardPage() {
           {draft.status === "complete" && (
             <div className="stat-card mb-8 rounded-xl p-5 text-center">
               <div className="font-display text-2xl text-gold">Draft Complete</div>
+            </div>
+          )}
+
+          {pool.length > 0 && (
+            <div className="stat-card mb-8 rounded-xl p-5">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                <h2 className="font-display text-xl text-bone">Best Available</h2>
+                <span className="text-xs text-mute">{available.length} players left</span>
+              </div>
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                <input
+                  className="rounded-md border border-line bg-panel px-3 py-1.5 text-sm text-bone outline-none focus:border-teal"
+                  placeholder="Search players..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                />
+                {positions.map((pos) => (
+                  <button
+                    key={pos}
+                    onClick={() => setPosFilter(pos)}
+                    className={`rounded px-2 py-1 text-xs font-semibold uppercase ${
+                      posFilter === pos ? "bg-teal text-ink" : "border border-line text-mute hover:text-bone"
+                    }`}
+                  >
+                    {pos}
+                  </button>
+                ))}
+              </div>
+              <div className="grid max-h-72 gap-1 overflow-y-auto sm:grid-cols-3">
+                {bestAvailable.map((p) => (
+                  <div key={p.id} className="flex items-center justify-between rounded border border-line px-2 py-1.5 text-xs">
+                    <span className="text-bone">{p.name}</span>
+                    <span className="text-mute">{[p.position, p.nfl_team].filter(Boolean).join(" · ")}</span>
+                  </div>
+                ))}
+                {bestAvailable.length === 0 && <p className="text-xs text-mute">No matching players.</p>}
+              </div>
             </div>
           )}
 

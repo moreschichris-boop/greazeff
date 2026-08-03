@@ -58,6 +58,20 @@ export type Photo = {
   sort_order: number;
 };
 
+export type RosterEntry = {
+  id: string;
+  season_id: string;
+  owner_id: string;
+  player_name: string;
+  position: string | null;
+  nfl_team: string | null;
+  keeper_eligible: boolean;
+  keeper_round: number | null;
+  is_free_agent: boolean;
+  notes: string | null;
+  sort_order: number;
+};
+
 export type Draft = {
   id: string;
   season_id: string;

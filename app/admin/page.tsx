@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { supabase, Owner, Season, SeasonResult, RecordEntry, Photo, Draft, DraftPlayer, DraftPick } from "@/lib/supabase";
+import { supabase, Owner, Season, SeasonResult, RecordEntry, Photo, Draft, DraftPlayer, DraftPick, RosterEntry } from "@/lib/supabase";
 import { sha256, markAdminSession, hasAdminSession, clearAdminSession } from "@/lib/auth";
 import { teamOrderForRound, ownerForPick, totalPicks } from "@/lib/draft";
 
-type Tab = "owners" | "seasons" | "standings" | "draft" | "records" | "photos" | "settings";
+type Tab = "owners" | "seasons" | "standings" | "rosters" | "draft" | "records" | "photos" | "settings";
 
 export default function AdminPage() {
   const [unlocked, setUnlocked] = useState(false);
@@ -71,6 +71,7 @@ function AdminDashboard({ onLock }: { onLock: () => void }) {
     { key: "owners", label: "Owners" },
     { key: "seasons", label: "Seasons" },
     { key: "standings", label: "Standings" },
+    { key: "rosters", label: "Rosters" },
     { key: "draft", label: "Draft" },
     { key: "records", label: "Records" },
     { key: "photos", label: "Photos" },
@@ -102,6 +103,7 @@ function AdminDashboard({ onLock }: { onLock: () => void }) {
         {tab === "owners" && <OwnersTab />}
         {tab === "seasons" && <SeasonsTab />}
         {tab === "standings" && <StandingsTab />}
+        {tab === "rosters" && <RostersTab />}
         {tab === "draft" && <DraftTab />}
         {tab === "records" && <RecordsTab />}
         {tab === "photos" && <PhotosTab />}
@@ -423,6 +425,109 @@ function StandingsTab() {
       <button onClick={saveAll} className="mt-4 rounded-md bg-teal px-4 py-2 text-xs font-bold uppercase tracking-wide text-ink">
         Save Standings
       </button>
+    </div>
+  );
+}
+
+/* ---------- Rosters ---------- */
+
+function RostersTab() {
+  const [seasons, setSeasons] = useState<Season[]>([]);
+  const [owners, setOwners] = useState<Owner[]>([]);
+  const [seasonId, setSeasonId] = useState("");
+  const [ownerId, setOwnerId] = useState("");
+  const [entries, setEntries] = useState<RosterEntry[]>([]);
+  const [msg, setMsg] = useState("");
+
+  useEffect(() => {
+    (async () => {
+      const { data: s } = await supabase.from("seasons").select("*").order("year", { ascending: false });
+      const { data: o } = await supabase.from("owners").select("*").order("sort_order", { ascending: true });
+      setSeasons(s ?? []);
+      setOwners(o ?? []);
+      if (s && s.length) setSeasonId(s[0].id);
+      if (o && o.length) setOwnerId(o[0].id);
+    })();
+  }, []);
+
+  async function load() {
+    if (!seasonId || !ownerId) return;
+    const { data } = await supabase
+      .from("roster_entries")
+      .select("*")
+      .eq("season_id", seasonId)
+      .eq("owner_id", ownerId)
+      .order("sort_order", { ascending: true });
+    setEntries(data ?? []);
+  }
+  useEffect(() => { load(); }, [seasonId, ownerId]);
+
+  function update(i: number, patch: Partial<RosterEntry>) {
+    setEntries((prev) => prev.map((e, idx) => (idx === i ? { ...e, ...patch } : e)));
+  }
+
+  async function save(e: RosterEntry) {
+    const { id, ...rest } = e;
+    const { error } = await supabase.from("roster_entries").update(rest).eq("id", id);
+    setMsg(error ? `Error: ${error.message}` : "Saved.");
+  }
+
+  async function addPlayer() {
+    const { error } = await supabase.from("roster_entries").insert({
+      season_id: seasonId,
+      owner_id: ownerId,
+      player_name: "New Player",
+      sort_order: entries.length,
+    });
+    setMsg(error ? `Error: ${error.message}` : "Added.");
+    load();
+  }
+
+  async function remove(id: string) {
+    await supabase.from("roster_entries").delete().eq("id", id);
+    load();
+  }
+
+  return (
+    <div>
+      <SectionMsg msg={msg} />
+      <div className="mb-4 flex flex-wrap gap-3">
+        <select className={`${inputCls} max-w-xs`} value={seasonId} onChange={(e) => setSeasonId(e.target.value)}>
+          {seasons.map((s) => (<option key={s.id} value={s.id}>{s.year}</option>))}
+        </select>
+        <select className={`${inputCls} max-w-xs`} value={ownerId} onChange={(e) => setOwnerId(e.target.value)}>
+          {owners.map((o) => (<option key={o.id} value={o.id}>{o.name}</option>))}
+        </select>
+      </div>
+
+      <button onClick={addPlayer} className="mb-4 rounded-md bg-teal px-4 py-2 text-xs font-bold uppercase tracking-wide text-ink">
+        + Add Player
+      </button>
+
+      <div className="space-y-3">
+        {entries.map((e, i) => (
+          <div key={e.id} className="stat-card grid gap-2 rounded-xl p-4 sm:grid-cols-6">
+            <input className={inputCls} value={e.player_name} onChange={(ev) => update(i, { player_name: ev.target.value })} placeholder="Player name" />
+            <input className={inputCls} value={e.position ?? ""} onChange={(ev) => update(i, { position: ev.target.value })} placeholder="Position" />
+            <input className={inputCls} value={e.nfl_team ?? ""} onChange={(ev) => update(i, { nfl_team: ev.target.value })} placeholder="Team" />
+            <label className="flex items-center gap-2 text-xs text-mute">
+              <input type="checkbox" checked={e.keeper_eligible} onChange={(ev) => update(i, { keeper_eligible: ev.target.checked })} />
+              Keeper eligible
+            </label>
+            <input type="number" className={inputCls} value={e.keeper_round ?? ""} onChange={(ev) => update(i, { keeper_round: ev.target.value ? +ev.target.value : null })} placeholder="Keeper round" />
+            <label className="flex items-center gap-2 text-xs text-mute">
+              <input type="checkbox" checked={e.is_free_agent} onChange={(ev) => update(i, { is_free_agent: ev.target.checked })} />
+              FA acquisition
+            </label>
+            <input className={`${inputCls} sm:col-span-5`} value={e.notes ?? ""} onChange={(ev) => update(i, { notes: ev.target.value })} placeholder="Notes (optional)" />
+            <div className="flex gap-2">
+              <button onClick={() => save(e)} className="flex-1 rounded-md bg-teal px-3 py-2 text-xs font-bold uppercase tracking-wide text-ink">Save</button>
+              <button onClick={() => remove(e.id)} className="rounded-md border border-line px-3 py-2 text-xs text-ember">✕</button>
+            </div>
+          </div>
+        ))}
+        {entries.length === 0 && <p className="text-mute">No roster entered for this owner/season yet.</p>}
+      </div>
     </div>
   );
 }
@@ -762,9 +867,14 @@ function MakePickForm({
   const [position, setPosition] = useState("");
   const [team, setTeam] = useState("");
   const [busy, setBusy] = useState(false);
+  const [posFilter, setPosFilter] = useState("ALL");
 
   const available = pool.filter((p) => !p.drafted);
-  const suggestions = name.length >= 1 ? available.filter((p) => p.name.toLowerCase().includes(name.toLowerCase())).slice(0, 8) : [];
+  const positions = ["ALL", ...Array.from(new Set(available.map((p) => p.position).filter(Boolean) as string[])).sort()];
+  const bestAvailable = available
+    .filter((p) => posFilter === "ALL" || p.position === posFilter)
+    .filter((p) => !name || p.name.toLowerCase().includes(name.toLowerCase()))
+    .slice(0, 30);
 
   function pick(p: DraftPlayer) {
     setName(p.name);
@@ -802,22 +912,50 @@ function MakePickForm({
   return (
     <div className="stat-card rounded-xl p-4">
       <div className="grid gap-2 sm:grid-cols-4">
-        <input className={`${inputCls} sm:col-span-2`} value={name} onChange={(e) => setName(e.target.value)} placeholder="Player name" />
+        <input className={`${inputCls} sm:col-span-2`} value={name} onChange={(e) => setName(e.target.value)} placeholder="Player name / search" />
         <input className={inputCls} value={position} onChange={(e) => setPosition(e.target.value)} placeholder="Position" />
         <input className={inputCls} value={team} onChange={(e) => setTeam(e.target.value)} placeholder="NFL team" />
       </div>
-      {suggestions.length > 0 && (
-        <div className="mt-2 flex flex-wrap gap-1">
-          {suggestions.map((p) => (
-            <button key={p.id} onClick={() => pick(p)} className="rounded border border-line px-2 py-1 text-xs text-mute hover:border-teal hover:text-teal">
-              {p.name}{p.position ? ` (${p.position})` : ""}
-            </button>
-          ))}
-        </div>
-      )}
       <button disabled={busy} onClick={submit} className="mt-3 rounded-md bg-teal px-4 py-2 text-xs font-bold uppercase tracking-wide text-ink disabled:opacity-50">
         {busy ? "Saving..." : "Make Pick"}
       </button>
+
+      {pool.length > 0 && (
+        <div className="mt-5 border-t border-line pt-4">
+          <div className="mb-2 flex items-center justify-between">
+            <h4 className="text-xs font-semibold uppercase tracking-widest text-teal">Best Available</h4>
+            <span className="text-xs text-mute">{available.length} left in pool</span>
+          </div>
+          <div className="mb-3 flex flex-wrap gap-1">
+            {positions.map((pos) => (
+              <button
+                key={pos}
+                onClick={() => setPosFilter(pos)}
+                className={`rounded px-2 py-1 text-xs font-semibold uppercase ${
+                  posFilter === pos ? "bg-teal text-ink" : "border border-line text-mute hover:text-bone"
+                }`}
+              >
+                {pos}
+              </button>
+            ))}
+          </div>
+          <div className="max-h-64 overflow-y-auto">
+            <div className="grid gap-1 sm:grid-cols-2">
+              {bestAvailable.map((p) => (
+                <button
+                  key={p.id}
+                  onClick={() => pick(p)}
+                  className="flex items-center justify-between rounded border border-line px-2 py-1.5 text-left text-xs text-mute hover:border-teal hover:text-teal"
+                >
+                  <span className="text-bone">{p.name}</span>
+                  <span>{[p.position, p.nfl_team].filter(Boolean).join(" · ")}</span>
+                </button>
+              ))}
+              {bestAvailable.length === 0 && <p className="text-xs text-mute">No matching players left.</p>}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

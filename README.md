@@ -94,6 +94,30 @@ It did **not** have weekly scores or full win-loss standings, so:
   Record, etc.) — replace the placeholder text with real values once you dig
   them up, or delete rows you don't want to track.
 
+## Season-ending rosters & keeper eligibility
+
+Public **`/rosters`** page shows every team's final roster for a chosen
+season, with keeper eligibility badges. Manage it from Admin → Rosters:
+pick a season and owner, add each player with position/team, mark whether
+they're keeper eligible, and set which round it'll cost to keep them next
+year. Keeper cost has enough exceptions in the league rules (free-agent
+keepers only last one year, rounds 1-2 aren't eligible, multi-keeper
+tiebreaks, etc.) that it's a plain editable field rather than
+auto-calculated — enter the round by hand using your rules sheet.
+
+If your Supabase project is already live, run `supabase/migration_002_rosters.sql`
+(just the one new table) instead of the full `schema.sql` — SQL Editor → New
+query → paste → Run.
+
+## Best available players during the draft
+
+Both the public `/draft` board and the admin pick form now show a **Best
+Available** panel: a live, filterable list of everyone left in the player
+pool, with position buttons (QB/RB/WR/TE/K/DEF, whatever positions are in
+your pool) and a search box. It updates in real time as picks are made — no
+refresh needed, same as the board itself. In admin, clicking a player in
+that list fills the pick form for you.
+
 ## Live draft
 
 There's a public **`/draft`** board (visible to anyone, updates live) and a

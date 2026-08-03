@@ -1,0 +1,207 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { supabase, Owner, Draft, DraftPick, Season } from "@/lib/supabase";
+import { teamOrderForRound, ownerForPick, totalPicks } from "@/lib/draft";
+
+export default function DraftBoardPage() {
+  const [seasons, setSeasons] = useState<Season[]>([]);
+  const [seasonId, setSeasonId] = useState<string>("");
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const [owners, setOwners] = useState<Owner[]>([]);
+  const [picks, setPicks] = useState<DraftPick[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      const { data: o } = await supabase.from("owners").select("*").order("sort_order", { ascending: true });
+      const { data: s } = await supabase.from("seasons").select("*").order("year", { ascending: false });
+      setOwners(o ?? []);
+      setSeasons(s ?? []);
+      if (s && s.length) setSeasonId(s[0].id);
+      setLoading(false);
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (!seasonId) return;
+    let cancelled = false;
+
+    async function loadDraft() {
+      const { data: d } = await supabase.from("drafts").select("*").eq("season_id", seasonId).maybeSingle();
+      if (cancelled) return;
+      setDraft(d ?? null);
+      if (d) {
+        const { data: p } = await supabase
+          .from("draft_picks")
+          .select("*")
+          .eq("draft_id", d.id)
+          .order("pick_number", { ascending: true });
+        if (!cancelled) setPicks(p ?? []);
+      } else {
+        setPicks([]);
+      }
+    }
+    loadDraft();
+
+    return () => { cancelled = true; };
+  }, [seasonId]);
+
+  // Realtime: live-update the board as picks are made and as the draft's
+  // current_pick / status changes, from any device.
+  useEffect(() => {
+    if (!draft?.id) return;
+
+    const channel = supabase
+      .channel(`draft-${draft.id}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "draft_picks", filter: `draft_id=eq.${draft.id}` }, (payload) => {
+        setPicks((prev) => {
+          if (payload.eventType === "INSERT") {
+            const row = payload.new as DraftPick;
+            if (prev.some((p) => p.id === row.id)) return prev;
+            return [...prev, row].sort((a, b) => a.pick_number - b.pick_number);
+          }
+          if (payload.eventType === "DELETE") {
+            return prev.filter((p) => p.id !== (payload.old as DraftPick).id);
+          }
+          if (payload.eventType === "UPDATE") {
+            const row = payload.new as DraftPick;
+            return prev.map((p) => (p.id === row.id ? row : p));
+          }
+          return prev;
+        });
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "drafts", filter: `id=eq.${draft.id}` }, (payload) => {
+        setDraft(payload.new as Draft);
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [draft?.id]);
+
+  const ownerMap = useMemo(() => new Map(owners.map((o) => [o.id, o])), [owners]);
+  const pickMap = useMemo(() => new Map(picks.map((p) => [p.pick_number, p])), [picks]);
+
+  const onClock = draft && draft.status === "in_progress" ? ownerForPick(draft.draft_order, draft.current_pick) : null;
+
+  if (loading) return <p className="text-mute">Loading...</p>;
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="font-display text-4xl tracking-wide text-bone">Live Draft Board</h1>
+        <select
+          className="rounded-md border border-line bg-panel px-3 py-2 text-sm text-bone"
+          value={seasonId}
+          onChange={(e) => setSeasonId(e.target.value)}
+        >
+          {seasons.map((s) => (
+            <option key={s.id} value={s.id}>{s.year}</option>
+          ))}
+        </select>
+      </div>
+      <div className="divider-tentacle my-6" />
+
+      {!draft && <p className="text-mute">No draft set up for this season yet.</p>}
+
+      {draft && (
+        <>
+          {draft.status === "setup" && (
+            <p className="mb-6 rounded-lg border border-line bg-panel/60 p-4 text-sm text-mute">
+              This draft hasn&apos;t started yet.
+            </p>
+          )}
+
+          {draft.status === "in_progress" && onClock && (
+            <div className="stat-card mb-8 flex flex-wrap items-center justify-between gap-3 rounded-xl border-teal/60 p-5">
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-widest text-mute">
+                  On the Clock &middot; Round {onClock.round}, Pick {onClock.pickInRound}
+                </div>
+                <div className="font-display text-2xl text-teal">{ownerMap.get(onClock.ownerId)?.name ?? "—"}</div>
+              </div>
+              <div className="text-sm text-mute">
+                Pick {draft.current_pick} of {totalPicks(draft.draft_order, draft.rounds)}
+              </div>
+            </div>
+          )}
+
+          {draft.status === "complete" && (
+            <div className="stat-card mb-8 rounded-xl p-5 text-center">
+              <div className="font-display text-2xl text-gold">Draft Complete</div>
+            </div>
+          )}
+
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[900px] border-collapse text-xs">
+              <thead>
+                <tr>
+                  <th className="w-14 border-b border-line py-2 text-left text-mute">Rd</th>
+                  {draft.draft_order.map((ownerId) => (
+                    <th key={ownerId} className="border-b border-line px-2 py-2 text-left font-semibold text-bone">
+                      {ownerMap.get(ownerId)?.name ?? "—"}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {Array.from({ length: draft.rounds }, (_, i) => i + 1).map((round) => {
+                  const order = teamOrderForRound(draft.draft_order, round);
+                  return (
+                    <tr key={round} className="border-b border-line/50">
+                      <td className="py-2 font-display text-base text-mute">{round}</td>
+                      {draft.draft_order.map((colOwnerId) => {
+                        const pickInRound = order.indexOf(colOwnerId) + 1;
+                        const pickNumber = (round - 1) * draft.draft_order.length + pickInRound;
+                        const pick = pickMap.get(pickNumber);
+                        const isOnClock = draft.status === "in_progress" && pickNumber === draft.current_pick;
+                        return (
+                          <td
+                            key={colOwnerId}
+                            className={`px-2 py-2 align-top ${isOnClock ? "bg-teal/10" : ""}`}
+                          >
+                            {pick ? (
+                              <div>
+                                <div className="font-semibold text-bone">{pick.player_name}</div>
+                                <div className="text-mute">
+                                  {[pick.position, pick.nfl_team].filter(Boolean).join(" · ")}
+                                  {pick.is_keeper ? " · Keeper" : ""}
+                                </div>
+                              </div>
+                            ) : isOnClock ? (
+                              <span className="text-teal">on the clock</span>
+                            ) : (
+                              <span className="text-mute">—</span>
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <h2 className="mt-12 font-display text-2xl tracking-wide text-bone">Recent Picks</h2>
+          <div className="divider-tentacle my-4" />
+          <div className="space-y-2">
+            {[...picks].reverse().slice(0, 15).map((p) => (
+              <div key={p.id} className="stat-card flex items-center justify-between rounded-lg px-4 py-2 text-sm">
+                <span className="text-mute">
+                  Pick {p.pick_number} (Rd {p.round})
+                </span>
+                <span className="text-bone">{ownerMap.get(p.owner_id)?.name}</span>
+                <span className="font-semibold text-teal">
+                  {p.player_name}
+                  {p.position ? ` (${p.position})` : ""}
+                </span>
+              </div>
+            ))}
+            {picks.length === 0 && <p className="text-mute">No picks yet.</p>}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}

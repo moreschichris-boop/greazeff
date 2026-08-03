@@ -24,10 +24,17 @@ export default async function OwnerProfilePage({ params }: { params: { slug: str
         &larr; All owners
       </Link>
 
-      <div className="mt-4 flex flex-col items-center gap-5 text-center sm:flex-row sm:items-start sm:text-left">
+      <div className="mt-4 flex flex-col items-center gap-5 text-center">
         {owner.photo_url ? (
-          <div className="relative h-64 w-64 shrink-0 overflow-hidden rounded-xl bg-panel ring-4 ring-teal/60">
-            <Image src={owner.photo_url} alt={owner.name} fill className="object-contain" />
+          <div className="relative aspect-square w-full max-w-xl overflow-hidden rounded-xl bg-panel ring-4 ring-teal/60">
+            <Image
+              src={owner.photo_url}
+              alt={owner.name}
+              fill
+              className="object-contain"
+              sizes="(min-width: 1280px) 576px, 90vw"
+              priority
+            />
           </div>
         ) : (
           <div className="ring-4 ring-teal/60 rounded-full">
@@ -40,7 +47,7 @@ export default async function OwnerProfilePage({ params }: { params: { slug: str
         </div>
       </div>
 
-      {owner.bio && <p className="mt-6 max-w-2xl text-mute">{owner.bio}</p>}
+      {owner.bio && <p className="mx-auto mt-6 max-w-2xl text-center text-mute">{owner.bio}</p>}
 
       <div className="mt-8 grid grid-cols-2 gap-4 sm:grid-cols-4">
         <MiniStat label="Championships" value={champs.length} tone="gold" />

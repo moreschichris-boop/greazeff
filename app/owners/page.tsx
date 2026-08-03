@@ -14,22 +14,22 @@ export default async function OwnersPage() {
       <p className="mt-2 text-mute">Twelve franchises. Twelve egos. One league.</p>
       <div className="divider-tentacle my-6" />
 
-      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-6 sm:grid-cols-2">
         {(owners ?? []).map((o) => (
           <Link key={o.id} href={`/owners/${o.slug}`} className="stat-card group rounded-xl p-5 text-center transition hover:border-teal/60">
             {o.photo_url ? (
-              <div className="relative mx-auto h-48 w-48 overflow-hidden rounded-xl bg-panel ring-2 ring-line group-hover:ring-teal">
+              <div className="relative mx-auto aspect-square w-full max-w-[320px] overflow-hidden rounded-xl bg-panel ring-2 ring-line group-hover:ring-teal">
                 <Image
                   src={o.photo_url}
                   alt={o.name}
                   fill
                   className="object-contain object-center"
-                  sizes="192px"
+                  sizes="(min-width: 1024px) 320px, (min-width: 640px) 45vw, 90vw"
                 />
               </div>
             ) : (
-              <div className="mx-auto flex h-48 w-48 items-center justify-center rounded-xl bg-panel ring-2 ring-line group-hover:ring-teal">
-                <SquidMark size={120} />
+              <div className="mx-auto flex aspect-square w-full max-w-[320px] items-center justify-center rounded-xl bg-panel ring-2 ring-line group-hover:ring-teal">
+                <SquidMark size={160} />
               </div>
             )}
             <div className="mt-4">

@@ -24,15 +24,11 @@ export default async function OwnerProfilePage({ params }: { params: { slug: str
         &larr; All owners
       </Link>
 
-      <div className="mt-4 flex flex-col items-center gap-5 text-center sm:flex-row sm:text-left">
+      <div className="mt-4 flex flex-col items-center gap-5 text-center sm:flex-row sm:items-start sm:text-left">
         {owner.photo_url ? (
-          <Image
-            src={owner.photo_url}
-            alt={owner.name}
-            width={120}
-            height={120}
-            className="h-28 w-28 rounded-full object-cover ring-4 ring-teal/60"
-          />
+          <div className="relative h-64 w-64 shrink-0 overflow-hidden rounded-xl bg-panel ring-4 ring-teal/60">
+            <Image src={owner.photo_url} alt={owner.name} fill className="object-contain" />
+          </div>
         ) : (
           <div className="ring-4 ring-teal/60 rounded-full">
             <SquidMark size={112} />

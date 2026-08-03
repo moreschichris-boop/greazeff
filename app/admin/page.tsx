@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { supabase, Owner, Season, SeasonResult, RecordEntry, Photo, Draft, DraftPlayer, DraftPick, RosterEntry } from "@/lib/supabase";
 import { sha256, markAdminSession, hasAdminSession, clearAdminSession } from "@/lib/auth";
 import { teamOrderForRound, ownerForPick, totalPicks } from "@/lib/draft";
+import { uploadImage } from "@/lib/upload";
 
 type Tab = "owners" | "seasons" | "standings" | "rosters" | "draft" | "records" | "photos" | "settings";
 
@@ -178,6 +179,21 @@ function OwnersTab() {
 
 function OwnerForm({ owner, setOwner, onSave }: { owner: Owner; setOwner: (o: Owner) => void; onSave: (o: Owner) => void }) {
   const questionnaire = owner.questionnaire ?? [];
+  const [uploading, setUploading] = useState(false);
+  const [uploadMsg, setUploadMsg] = useState("");
+
+  async function handlePhotoFile(file: File | null) {
+    if (!file) return;
+    setUploading(true);
+    setUploadMsg("");
+    try {
+      const url = await uploadImage(file, "owners");
+      setOwner({ ...owner, photo_url: url });
+    } catch (err: any) {
+      setUploadMsg(`Upload failed: ${err.message ?? err}`);
+    }
+    setUploading(false);
+  }
 
   function updateQ(i: number, key: "question" | "answer", val: string) {
     const copy = [...questionnaire];
@@ -195,7 +211,20 @@ function OwnerForm({ owner, setOwner, onSave }: { owner: Owner; setOwner: (o: Ow
     <div className="mt-4 space-y-3">
       <input className={inputCls} value={owner.name} onChange={(e) => setOwner({ ...owner, name: e.target.value })} placeholder="Name" />
       <input className={inputCls} value={owner.team_name ?? ""} onChange={(e) => setOwner({ ...owner, team_name: e.target.value })} placeholder="Team name" />
-      <input className={inputCls} value={owner.photo_url ?? ""} onChange={(e) => setOwner({ ...owner, photo_url: e.target.value })} placeholder="Photo URL" />
+      <div>
+        <div className="flex items-center gap-3">
+          <input
+            type="file"
+            accept="image/*"
+            className={`${inputCls} file:mr-3 file:rounded file:border-0 file:bg-teal file:px-3 file:py-1.5 file:text-xs file:font-bold file:uppercase file:text-ink`}
+            onChange={(e) => handlePhotoFile(e.target.files?.[0] ?? null)}
+          />
+          {owner.photo_url && <img src={owner.photo_url} alt="" className="h-10 w-10 rounded-full object-cover" />}
+        </div>
+        {uploading && <p className="mt-1 text-xs text-mute">Uploading...</p>}
+        {uploadMsg && <p className="mt-1 text-xs text-ember">{uploadMsg}</p>}
+        <input className={`${inputCls} mt-2`} value={owner.photo_url ?? ""} onChange={(e) => setOwner({ ...owner, photo_url: e.target.value })} placeholder="...or paste an image URL" />
+      </div>
       <textarea className={inputCls} value={owner.bio ?? ""} onChange={(e) => setOwner({ ...owner, bio: e.target.value })} placeholder="Bio" rows={3} />
 
       <div>
@@ -1077,6 +1106,8 @@ function PhotosTab() {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [msg, setMsg] = useState("");
   const [form, setForm] = useState({ season_year: "", url: "", caption: "" });
+  const [file, setFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
 
   async function load() {
     const { data } = await supabase.from("photos").select("*").order("season_year", { ascending: false });
@@ -1085,13 +1116,26 @@ function PhotosTab() {
   useEffect(() => { load(); }, []);
 
   async function add() {
-    if (!form.season_year || !form.url) {
-      setMsg("Season year and photo URL are required.");
+    if (!form.season_year || (!form.url && !file)) {
+      setMsg("Season year and either an uploaded photo or an image URL are required.");
       return;
     }
-    const { error } = await supabase.from("photos").insert(form);
+    let url = form.url;
+    if (file) {
+      setUploading(true);
+      try {
+        url = await uploadImage(file, form.season_year || "misc");
+      } catch (err: any) {
+        setMsg(`Upload failed: ${err.message ?? err}`);
+        setUploading(false);
+        return;
+      }
+      setUploading(false);
+    }
+    const { error } = await supabase.from("photos").insert({ ...form, url });
     setMsg(error ? `Error: ${error.message}` : "Added.");
     setForm({ season_year: "", url: "", caption: "" });
+    setFile(null);
     load();
   }
 
@@ -1105,10 +1149,16 @@ function PhotosTab() {
       <SectionMsg msg={msg} />
       <div className="stat-card mb-6 grid gap-3 rounded-xl p-4 sm:grid-cols-3">
         <input className={inputCls} placeholder="Season year, e.g. 2024-25" value={form.season_year} onChange={(e) => setForm({ ...form, season_year: e.target.value })} />
-        <input className={inputCls} placeholder="Image URL" value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} />
+        <input
+          type="file"
+          accept="image/*"
+          className={`${inputCls} file:mr-3 file:rounded file:border-0 file:bg-teal file:px-3 file:py-1.5 file:text-xs file:font-bold file:uppercase file:text-ink`}
+          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+        />
         <input className={inputCls} placeholder="Caption (optional)" value={form.caption} onChange={(e) => setForm({ ...form, caption: e.target.value })} />
-        <button onClick={add} className="sm:col-span-3 rounded-md bg-teal px-4 py-2 text-xs font-bold uppercase tracking-wide text-ink">
-          + Add Photo
+        <input className={`${inputCls} sm:col-span-3`} placeholder="...or paste an image URL instead of uploading" value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} disabled={!!file} />
+        <button disabled={uploading} onClick={add} className="sm:col-span-3 rounded-md bg-teal px-4 py-2 text-xs font-bold uppercase tracking-wide text-ink disabled:opacity-50">
+          {uploading ? "Uploading..." : "+ Add Photo"}
         </button>
       </div>
 

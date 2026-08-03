@@ -179,6 +179,21 @@ create policy "public write draft_picks" on draft_picks for all using (true) wit
 alter publication supabase_realtime add table drafts;
 alter publication supabase_realtime add table draft_picks;
 
+-- Storage bucket for uploaded photos (gallery + owner headshots), so the
+-- admin panel can upload image files directly instead of only pasting URLs.
+insert into storage.buckets (id, name, public)
+values ('photos', 'photos', true)
+on conflict (id) do nothing;
+
+create policy "Public read photos bucket" on storage.objects
+  for select using (bucket_id = 'photos');
+create policy "Public upload photos bucket" on storage.objects
+  for insert with check (bucket_id = 'photos');
+create policy "Public update photos bucket" on storage.objects
+  for update using (bucket_id = 'photos');
+create policy "Public delete photos bucket" on storage.objects
+  for delete using (bucket_id = 'photos');
+
 -- Default PIN is "3113" hashed with SHA-256. Change it from the admin panel
 -- once the site is live (Settings tab), or replace the hash below before
 -- running this file. To generate a new hash: run

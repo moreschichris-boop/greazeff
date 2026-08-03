@@ -94,6 +94,18 @@ It did **not** have weekly scores or full win-loss standings, so:
   Record, etc.) — replace the placeholder text with real values once you dig
   them up, or delete rows you don't want to track.
 
+## Uploading photos directly (no URL needed)
+
+Admin → Photos (and the photo field on each owner's profile in Admin →
+Owners) now has a file picker — choose an image straight from your
+computer/phone and it uploads to Supabase Storage automatically. Pasting a
+URL still works too if you'd rather link an image hosted elsewhere.
+
+This needs one extra one-time step if your Supabase project is already
+live: run `supabase/migration_004_photo_storage.sql` (SQL Editor → New
+query → paste → Run) — it creates the storage bucket uploads go into. Fresh
+installs get this automatically since it's now part of `schema.sql`.
+
 ## Season-ending rosters & keeper eligibility
 
 Public **`/rosters`** page shows every team's final roster for a chosen

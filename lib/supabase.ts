@@ -105,6 +105,14 @@ export type SeasonCost = {
   sort_order: number;
 };
 
+export type WeeklyResult = {
+  id: string;
+  season_id: string;
+  week: number;
+  winner_owner_id: string | null;
+  loser_owner_id: string | null;
+};
+
 export type Draft = {
   id: string;
   season_id: string;

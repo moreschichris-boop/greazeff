@@ -1,10 +1,12 @@
 import { supabase, Owner } from "@/lib/supabase";
+import CareerStatsTable, { CareerRow } from "@/components/CareerStatsTable";
 
 export const revalidate = 0;
 
 export default async function RecordsPage() {
-  const { data: owners } = await supabase.from("owners").select("*");
+  const { data: owners } = await supabase.from("owners").select("*").order("sort_order", { ascending: true });
   const { data: seasons } = await supabase.from("seasons").select("*");
+  const { data: results } = await supabase.from("season_results").select("*");
   const { data: manualRecords } = await supabase
     .from("all_time_records")
     .select("*")
@@ -28,6 +30,39 @@ export default async function RecordsPage() {
   const regSeason = tally("reg_season_winner_id");
   const toiletBowls = tally("last_place_id");
 
+  const champCount = new Map(champs.map((c) => [c.owner?.id, c.count]));
+  const runnerUpCount = new Map(runnerUps.map((c) => [c.owner?.id, c.count]));
+  const regSeasonCount = new Map(regSeason.map((c) => [c.owner?.id, c.count]));
+  const toiletBowlCount = new Map(toiletBowls.map((c) => [c.owner?.id, c.count]));
+
+  const careerRows: CareerRow[] = (owners ?? []).map((o) => {
+    const ownerResults = (results ?? []).filter((r) => r.owner_id === o.id);
+    const wins = ownerResults.reduce((sum, r) => sum + (r.wins ?? 0), 0);
+    const losses = ownerResults.reduce((sum, r) => sum + (r.losses ?? 0), 0);
+    const ties = ownerResults.reduce((sum, r) => sum + (r.ties ?? 0), 0);
+    const pointsFor = ownerResults.reduce((sum, r) => sum + Number(r.points_for ?? 0), 0);
+    const pointsAgainst = ownerResults.reduce((sum, r) => sum + Number(r.points_against ?? 0), 0);
+    const playoffAppearances = ownerResults.filter((r) => r.made_playoffs).length;
+    const totalGames = wins + losses + ties;
+
+    return {
+      ownerId: o.id,
+      name: o.name,
+      seasons: ownerResults.length,
+      wins,
+      losses,
+      ties,
+      winPct: totalGames > 0 ? wins / totalGames : 0,
+      pointsFor,
+      pointsAgainst,
+      championships: champCount.get(o.id) ?? 0,
+      runnerUps: runnerUpCount.get(o.id) ?? 0,
+      regSeasonTitles: regSeasonCount.get(o.id) ?? 0,
+      toiletBowls: toiletBowlCount.get(o.id) ?? 0,
+      playoffAppearances,
+    };
+  });
+
   return (
     <div>
       <h1 className="font-display text-4xl tracking-wide text-bone">All-Time Records</h1>
@@ -40,6 +75,13 @@ export default async function RecordsPage() {
         <Leaderboard title="Most Regular Season Titles" tone="teal" rows={regSeason} />
         <Leaderboard title="Most Toilet Bowl Finishes" tone="ember" rows={toiletBowls} />
       </div>
+
+      <h2 className="mt-14 font-display text-2xl tracking-wide text-bone">Career Stats — All Teams</h2>
+      <p className="mt-1 text-sm text-mute">
+        Cumulative totals across every season entered. Click any column to sort.
+      </p>
+      <div className="divider-tentacle my-4" />
+      <CareerStatsTable rows={careerRows} />
 
       <h2 className="mt-14 font-display text-2xl tracking-wide text-bone">Record Book</h2>
       <p className="mt-1 text-sm text-mute">

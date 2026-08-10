@@ -495,6 +495,18 @@ function RostersTab() {
     setEntries((prev) => prev.map((e, idx) => (idx === i ? { ...e, ...patch } : e)));
   }
 
+  function toggleKeeperSelected(i: number, checked: boolean) {
+    if (checked) {
+      const selectedCount = entries.filter((e) => e.keeper_selected).length;
+      if (selectedCount >= 2) {
+        setMsg("Only 2 keepers can be selected — uncheck one first.");
+        return;
+      }
+    }
+    setMsg("");
+    update(i, { keeper_selected: checked });
+  }
+
   async function save(e: RosterEntry) {
     const { id, ...rest } = e;
     const { error } = await supabase.from("roster_entries").update(rest).eq("id", id);
@@ -529,26 +541,38 @@ function RostersTab() {
         </select>
       </div>
 
-      <button onClick={addPlayer} className="mb-4 rounded-md bg-teal px-4 py-2 text-xs font-bold uppercase tracking-wide text-ink">
+      <button onClick={addPlayer} className="mb-2 rounded-md bg-teal px-4 py-2 text-xs font-bold uppercase tracking-wide text-ink">
         + Add Player
       </button>
+      <p className="mb-4 text-xs text-mute">
+        Keeping: {entries.filter((e) => e.keeper_selected).length} / 2 selected
+      </p>
 
       <div className="space-y-3">
         {entries.map((e, i) => (
-          <div key={e.id} className="stat-card grid gap-2 rounded-xl p-4 sm:grid-cols-6">
+          <div key={e.id} className="stat-card grid gap-2 rounded-xl p-4 sm:grid-cols-7">
             <input className={inputCls} value={e.player_name} onChange={(ev) => update(i, { player_name: ev.target.value })} placeholder="Player name" />
             <input className={inputCls} value={e.position ?? ""} onChange={(ev) => update(i, { position: ev.target.value })} placeholder="Position" />
             <input className={inputCls} value={e.nfl_team ?? ""} onChange={(ev) => update(i, { nfl_team: ev.target.value })} placeholder="Team" />
             <label className="flex items-center gap-2 text-xs text-mute">
-              <input type="checkbox" checked={e.keeper_eligible} onChange={(ev) => update(i, { keeper_eligible: ev.target.checked })} />
-              Keeper eligible
+              <input type="checkbox" checked={e.keeper_eligible} onChange={(ev) => update(i, { keeper_eligible: ev.target.checked, keeper_selected: ev.target.checked ? e.keeper_selected : false })} />
+              Eligible
             </label>
             <input type="number" className={inputCls} value={e.keeper_round ?? ""} onChange={(ev) => update(i, { keeper_round: ev.target.value ? +ev.target.value : null })} placeholder="Keeper round" />
+            <label className={`flex items-center gap-2 text-xs ${e.keeper_eligible ? "text-teal" : "text-mute/40"}`}>
+              <input
+                type="checkbox"
+                checked={e.keeper_selected}
+                disabled={!e.keeper_eligible}
+                onChange={(ev) => toggleKeeperSelected(i, ev.target.checked)}
+              />
+              Keeping (max 2)
+            </label>
             <label className="flex items-center gap-2 text-xs text-mute">
               <input type="checkbox" checked={e.is_free_agent} onChange={(ev) => update(i, { is_free_agent: ev.target.checked })} />
               FA acquisition
             </label>
-            <input className={`${inputCls} sm:col-span-5`} value={e.notes ?? ""} onChange={(ev) => update(i, { notes: ev.target.value })} placeholder="Notes (optional)" />
+            <input className={`${inputCls} sm:col-span-6`} value={e.notes ?? ""} onChange={(ev) => update(i, { notes: ev.target.value })} placeholder="Notes (optional)" />
             <div className="flex gap-2">
               <button onClick={() => save(e)} className="flex-1 rounded-md bg-teal px-3 py-2 text-xs font-bold uppercase tracking-wide text-ink">Save</button>
               <button onClick={() => remove(e.id)} className="rounded-md border border-line px-3 py-2 text-xs text-ember">✕</button>

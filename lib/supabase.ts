@@ -67,6 +67,7 @@ export type RosterEntry = {
   nfl_team: string | null;
   keeper_eligible: boolean;
   keeper_round: number | null;
+  keeper_selected: boolean;
   is_free_agent: boolean;
   notes: string | null;
   sort_order: number;

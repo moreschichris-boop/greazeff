@@ -71,9 +71,13 @@ export default function RostersPage() {
                       {e.player_name}
                       {e.position && <span className="ml-2 text-xs text-mute">{e.position}{e.nfl_team ? ` · ${e.nfl_team}` : ""}</span>}
                     </span>
-                    {e.keeper_eligible ? (
+                    {e.keeper_selected ? (
+                      <span className="rounded bg-gold/20 px-2 py-0.5 text-xs font-semibold text-gold">
+                        Keeping — Rd {e.keeper_round ?? "—"}{e.is_free_agent ? " (FA)" : ""}
+                      </span>
+                    ) : e.keeper_eligible ? (
                       <span className="rounded bg-teal/15 px-2 py-0.5 text-xs font-semibold text-teal">
-                        Keeper: Rd {e.keeper_round ?? "—"}{e.is_free_agent ? " (FA)" : ""}
+                        Eligible: Rd {e.keeper_round ?? "—"}{e.is_free_agent ? " (FA)" : ""}
                       </span>
                     ) : (
                       <span className="rounded bg-line px-2 py-0.5 text-xs text-mute">Not eligible</span>

@@ -1,4 +1,4 @@
-import { supabase, Owner } from "@/lib/supabase";
+import { supabase, Owner, Season, SeasonResult } from "@/lib/supabase";
 import CareerStatsTable, { CareerRow } from "@/components/CareerStatsTable";
 
 export const revalidate = 0;
@@ -13,6 +13,8 @@ export default async function RecordsPage() {
     .order("sort_order", { ascending: true });
 
   const ownerMap = new Map<string, Owner>((owners ?? []).map((o) => [o.id, o]));
+  const seasonMap = new Map<string, Season>((seasons ?? []).map((s) => [s.id, s]));
+  const sortedSeasons = [...(seasons ?? [])].sort((a, b) => a.year.localeCompare(b.year));
 
   const tally = (key: "champion_id" | "runner_up_id" | "reg_season_winner_id" | "last_place_id") => {
     const counts = new Map<string, number>();
@@ -63,6 +65,103 @@ export default async function RecordsPage() {
     };
   });
 
+  // --- Auto-computed single-season / career records, built entirely from
+  // season_results + seasons — nothing here is hand-entered. ---
+
+  // Best single-season record: most wins, tiebroken by win% then points for.
+  let bestSeason: SeasonResult | null = null;
+  for (const r of results ?? []) {
+    if (!bestSeason) { bestSeason = r; continue; }
+    const games = r.wins + r.losses + r.ties;
+    const bestGames = bestSeason.wins + bestSeason.losses + bestSeason.ties;
+    const pct = games > 0 ? r.wins / games : 0;
+    const bestPct = bestGames > 0 ? bestSeason.wins / bestGames : 0;
+    if (
+      r.wins > bestSeason.wins ||
+      (r.wins === bestSeason.wins && pct > bestPct) ||
+      (r.wins === bestSeason.wins && pct === bestPct && Number(r.points_for) > Number(bestSeason.points_for))
+    ) {
+      bestSeason = r;
+    }
+  }
+
+  // Most points scored in a single season.
+  let topScoringSeason: SeasonResult | null = null;
+  for (const r of results ?? []) {
+    if (!topScoringSeason || Number(r.points_for) > Number(topScoringSeason.points_for)) topScoringSeason = r;
+  }
+
+  // Longest championship drought: longest run of consecutive participated
+  // seasons without winning it all, for any single owner.
+  let droughtOwner: Owner | undefined;
+  let droughtLength = 0;
+  let droughtStartYear = "";
+  let droughtEndYear = "";
+  let droughtOngoing = false;
+
+  for (const o of owners ?? []) {
+    let streak = 0;
+    let streakStart = "";
+    let best = 0;
+    let bestStart = "";
+    let bestEnd = "";
+    let lastYear = "";
+    for (const s of sortedSeasons) {
+      const played = (results ?? []).some((r) => r.season_id === s.id && r.owner_id === o.id);
+      if (!played) continue;
+      const won = s.champion_id === o.id;
+      if (won) {
+        streak = 0;
+        streakStart = "";
+      } else {
+        if (streak === 0) streakStart = s.year;
+        streak += 1;
+        lastYear = s.year;
+        if (streak > best) {
+          best = streak;
+          bestStart = streakStart;
+          bestEnd = s.year;
+        }
+      }
+    }
+    if (best > droughtLength) {
+      droughtLength = best;
+      droughtOwner = o;
+      droughtStartYear = bestStart;
+      droughtEndYear = bestEnd;
+      droughtOngoing = bestEnd === lastYear && bestEnd === sortedSeasons[sortedSeasons.length - 1]?.year;
+    }
+  }
+
+  const computedRecords = [
+    {
+      title: "Best Single-Season Record",
+      value: bestSeason
+        ? `${ownerMap.get(bestSeason.owner_id)?.name} — ${bestSeason.wins}-${bestSeason.losses}${bestSeason.ties ? `-${bestSeason.ties}` : ""}`
+        : null,
+      subtitle: bestSeason ? seasonMap.get(bestSeason.season_id)?.year : undefined,
+    },
+    {
+      title: "Most Points in a Season",
+      value: topScoringSeason
+        ? `${ownerMap.get(topScoringSeason.owner_id)?.name} — ${Number(topScoringSeason.points_for).toFixed(1)}`
+        : null,
+      subtitle: topScoringSeason ? seasonMap.get(topScoringSeason.season_id)?.year : undefined,
+    },
+    {
+      title: "Longest Championship Drought",
+      value: droughtOwner ? `${droughtOwner.name} — ${droughtLength} season${droughtLength === 1 ? "" : "s"}` : null,
+      subtitle: droughtOwner ? `${droughtStartYear} – ${droughtEndYear}${droughtOngoing ? " (ongoing)" : ""}` : undefined,
+    },
+  ];
+
+  // Anything hand-added in Admin > Records beyond the auto-computed cards
+  // above still shows below (e.g. Biggest Blowout, once weekly scores are
+  // ever entered — that one needs game-level data this site doesn't track).
+  const extraManualRecords = (manualRecords ?? []).filter(
+    (r) => !["Best Single-Season Record", "Most Points in a Season", "Longest Championship Drought"].includes(r.title)
+  );
+
   return (
     <div>
       <h1 className="font-display text-4xl tracking-wide text-bone">All-Time Records</h1>
@@ -85,11 +184,26 @@ export default async function RecordsPage() {
 
       <h2 className="mt-14 font-display text-2xl tracking-wide text-bone">Record Book</h2>
       <p className="mt-1 text-sm text-mute">
-        Single-season and single-game records, curated by hand from league history.
+        Computed automatically from every season's standings on file.
       </p>
       <div className="divider-tentacle my-4" />
       <div className="grid gap-4 sm:grid-cols-2">
-        {(manualRecords ?? []).map((r) => (
+        {computedRecords.map((r) => (
+          <div key={r.title} className="stat-card rounded-xl p-5">
+            <div className="text-xs font-semibold uppercase tracking-widest text-teal">{r.title}</div>
+            <div className="mt-1 font-display text-xl text-bone">{r.value ?? "Not enough data yet"}</div>
+            {r.subtitle && <div className="text-xs text-mute">{r.subtitle}</div>}
+          </div>
+        ))}
+        <div className="stat-card rounded-xl p-5">
+          <div className="text-xs font-semibold uppercase tracking-widest text-teal">Biggest Blowout</div>
+          <div className="mt-1 font-display text-xl text-bone">Not available</div>
+          <p className="mt-2 text-sm text-mute">
+            Needs individual weekly matchup scores, which aren&apos;t tracked here — only season-ending
+            standings are. Add game data and a table for it later if you want this one.
+          </p>
+        </div>
+        {extraManualRecords.map((r) => (
           <div key={r.id} className="stat-card rounded-xl p-5">
             <div className="text-xs font-semibold uppercase tracking-widest text-teal">{r.title}</div>
             <div className="mt-1 font-display text-xl text-bone">

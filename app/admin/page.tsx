@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { supabase, Owner, Season, SeasonResult, RecordEntry, Photo, Draft, DraftPlayer, DraftPick, RosterEntry } from "@/lib/supabase";
+import { supabase, Owner, Season, SeasonResult, RecordEntry, Photo, Draft, DraftPlayer, DraftPick, RosterEntry, FinanceEntry, SeasonPayout, SeasonCost } from "@/lib/supabase";
 import { sha256, markAdminSession, hasAdminSession, clearAdminSession } from "@/lib/auth";
 import { teamOrderForRound, ownerForPick, totalPicks } from "@/lib/draft";
 import { uploadImage } from "@/lib/upload";
 
-type Tab = "owners" | "seasons" | "standings" | "rosters" | "draft" | "records" | "photos" | "settings";
+type Tab = "owners" | "seasons" | "standings" | "rosters" | "draft" | "records" | "photos" | "finances" | "settings";
 
 export default function AdminPage() {
   const [unlocked, setUnlocked] = useState(false);
@@ -75,6 +75,7 @@ function AdminDashboard({ onLock }: { onLock: () => void }) {
     { key: "rosters", label: "Rosters" },
     { key: "draft", label: "Draft" },
     { key: "records", label: "Records" },
+    { key: "finances", label: "Finances" },
     { key: "photos", label: "Photos" },
     { key: "settings", label: "Settings" },
   ];
@@ -107,6 +108,7 @@ function AdminDashboard({ onLock }: { onLock: () => void }) {
         {tab === "rosters" && <RostersTab />}
         {tab === "draft" && <DraftTab />}
         {tab === "records" && <RecordsTab />}
+        {tab === "finances" && <FinancesTab />}
         {tab === "photos" && <PhotosTab />}
         {tab === "settings" && <SettingsTab />}
       </div>
@@ -1119,6 +1121,272 @@ function RecordsTab() {
             </button>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Finances ---------- */
+
+function FinancesTab() {
+  const [seasons, setSeasons] = useState<Season[]>([]);
+  const [owners, setOwners] = useState<Owner[]>([]);
+  const [seasonId, setSeasonId] = useState("");
+  const [entries, setEntries] = useState<FinanceEntry[]>([]);
+  const [payouts, setPayouts] = useState<SeasonPayout[]>([]);
+  const [costs, setCosts] = useState<SeasonCost[]>([]);
+  const [msg, setMsg] = useState("");
+  const [section, setSection] = useState<"dues" | "payouts" | "costs">("dues");
+
+  useEffect(() => {
+    (async () => {
+      const { data: s } = await supabase.from("seasons").select("*").order("year", { ascending: false });
+      const { data: o } = await supabase.from("owners").select("*").order("sort_order", { ascending: true });
+      setSeasons(s ?? []);
+      setOwners(o ?? []);
+      if (s && s.length) setSeasonId(s[0].id);
+    })();
+  }, []);
+
+  async function load() {
+    if (!seasonId) return;
+    const [{ data: e }, { data: p }, { data: c }] = await Promise.all([
+      supabase.from("finance_entries").select("*").eq("season_id", seasonId),
+      supabase.from("season_payouts").select("*").eq("season_id", seasonId).order("sort_order", { ascending: true }),
+      supabase.from("season_costs").select("*").eq("season_id", seasonId).order("sort_order", { ascending: true }),
+    ]);
+    setEntries(e ?? []);
+    setPayouts(p ?? []);
+    setCosts(c ?? []);
+  }
+  useEffect(() => { load(); }, [seasonId]);
+
+  function rowFor(ownerId: string): FinanceEntry {
+    return (
+      entries.find((e) => e.owner_id === ownerId) ?? {
+        id: "",
+        season_id: seasonId,
+        owner_id: ownerId,
+        entry_fee: 0,
+        faab_spend: 0,
+        loser_weeks: 0,
+        loser_penalty: 0,
+        winner_weeks: 0,
+        winner_bonus: 0,
+        amount_paid: 0,
+        notes: null,
+      }
+    );
+  }
+
+  function updateEntry(ownerId: string, patch: Partial<FinanceEntry>) {
+    setEntries((prev) => {
+      const existing = prev.find((e) => e.owner_id === ownerId);
+      if (existing) return prev.map((e) => (e.owner_id === ownerId ? { ...e, ...patch } : e));
+      return [...prev, { ...rowFor(ownerId), ...patch }];
+    });
+  }
+
+  async function saveAllEntries() {
+    setMsg("Saving...");
+    for (const e of entries) {
+      const { id, ...rest } = e;
+      const { error } = await supabase.from("finance_entries").upsert(
+        { ...rest, id: id || undefined },
+        { onConflict: "season_id,owner_id" }
+      );
+      if (error) { setMsg(`Error: ${error.message}`); return; }
+    }
+    setMsg("Saved.");
+  }
+
+  async function bulkSetEntryFee() {
+    const val = prompt("Set this entry fee for all 12 owners? (e.g. 175)");
+    if (!val) return;
+    const fee = +val;
+    for (const o of owners) updateEntry(o.id, { entry_fee: fee });
+    setMsg(`Entry fee set to $${fee} for everyone — click Save to persist.`);
+  }
+
+  return (
+    <div>
+      <SectionMsg msg={msg} />
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <select className={`${inputCls} max-w-xs`} value={seasonId} onChange={(e) => setSeasonId(e.target.value)}>
+          {seasons.map((s) => (<option key={s.id} value={s.id}>{s.year}</option>))}
+        </select>
+        <div className="flex gap-2">
+          {(["dues", "payouts", "costs"] as const).map((s) => (
+            <button
+              key={s}
+              onClick={() => setSection(s)}
+              className={`rounded-md px-3 py-1.5 text-xs font-semibold uppercase tracking-wide ${
+                section === s ? "bg-teal text-ink" : "border border-line text-mute hover:text-bone"
+              }`}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {section === "dues" && (
+        <div>
+          <button onClick={bulkSetEntryFee} className="mb-4 rounded-md border border-line px-3 py-2 text-xs font-semibold uppercase tracking-wide text-mute hover:border-teal hover:text-teal">
+            Set Entry Fee for Everyone
+          </button>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[900px] border-collapse text-sm">
+              <thead>
+                <tr className="border-b border-line text-left text-xs uppercase tracking-widest text-mute">
+                  <th className="py-2">Owner</th>
+                  <th>Entry Fee</th>
+                  <th>FAAB Spend</th>
+                  <th>Loser Wks</th>
+                  <th>Loser Penalty</th>
+                  <th>Paid</th>
+                  <th>Winner Wks</th>
+                  <th>Winner Bonus</th>
+                </tr>
+              </thead>
+              <tbody>
+                {owners.map((o) => {
+                  const e = rowFor(o.id);
+                  return (
+                    <tr key={o.id} className="border-b border-line/60">
+                      <td className="py-2 text-bone">{o.name}</td>
+                      <td><input type="number" className={`${inputCls} w-20`} value={e.entry_fee} onChange={(ev) => updateEntry(o.id, { entry_fee: +ev.target.value })} /></td>
+                      <td><input type="number" className={`${inputCls} w-20`} value={e.faab_spend} onChange={(ev) => updateEntry(o.id, { faab_spend: +ev.target.value })} /></td>
+                      <td><input type="number" className={`${inputCls} w-16`} value={e.loser_weeks} onChange={(ev) => updateEntry(o.id, { loser_weeks: +ev.target.value })} /></td>
+                      <td><input type="number" className={`${inputCls} w-20`} value={e.loser_penalty} onChange={(ev) => updateEntry(o.id, { loser_penalty: +ev.target.value })} /></td>
+                      <td><input type="number" className={`${inputCls} w-20`} value={e.amount_paid} onChange={(ev) => updateEntry(o.id, { amount_paid: +ev.target.value })} /></td>
+                      <td><input type="number" className={`${inputCls} w-16`} value={e.winner_weeks} onChange={(ev) => updateEntry(o.id, { winner_weeks: +ev.target.value })} /></td>
+                      <td><input type="number" className={`${inputCls} w-20`} value={e.winner_bonus} onChange={(ev) => updateEntry(o.id, { winner_bonus: +ev.target.value })} /></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <button onClick={saveAllEntries} className="mt-4 rounded-md bg-teal px-4 py-2 text-xs font-bold uppercase tracking-wide text-ink">
+            Save Dues
+          </button>
+        </div>
+      )}
+
+      {section === "payouts" && <PayoutsSection seasonId={seasonId} owners={owners} payouts={payouts} onChange={load} setMsg={setMsg} />}
+      {section === "costs" && <CostsSection seasonId={seasonId} owners={owners} costs={costs} onChange={load} setMsg={setMsg} />}
+    </div>
+  );
+}
+
+function PayoutsSection({
+  seasonId,
+  owners,
+  payouts,
+  onChange,
+  setMsg,
+}: {
+  seasonId: string;
+  owners: Owner[];
+  payouts: SeasonPayout[];
+  onChange: () => void;
+  setMsg: (m: string) => void;
+}) {
+  async function add() {
+    const { error } = await supabase.from("season_payouts").insert({ season_id: seasonId, title: "New Payout", amount: 0, sort_order: payouts.length });
+    setMsg(error ? `Error: ${error.message}` : "Added.");
+    onChange();
+  }
+  async function save(p: SeasonPayout) {
+    const { id, ...rest } = p;
+    const { error } = await supabase.from("season_payouts").update(rest).eq("id", id);
+    setMsg(error ? `Error: ${error.message}` : "Saved.");
+  }
+  async function remove(id: string) {
+    await supabase.from("season_payouts").delete().eq("id", id);
+    onChange();
+  }
+  const [local, setLocal] = useState<SeasonPayout[]>(payouts);
+  useEffect(() => { setLocal(payouts); }, [payouts]);
+
+  return (
+    <div>
+      <button onClick={add} className="mb-4 rounded-md bg-teal px-4 py-2 text-xs font-bold uppercase tracking-wide text-ink">
+        + Add Payout
+      </button>
+      <div className="space-y-3">
+        {local.map((p, i) => (
+          <div key={p.id} className="stat-card grid gap-2 rounded-xl p-4 sm:grid-cols-4">
+            <input className={inputCls} value={p.title} onChange={(ev) => setLocal((prev) => prev.map((x, idx) => idx === i ? { ...x, title: ev.target.value } : x))} placeholder="Title (e.g. 1st Place)" />
+            <input type="number" className={inputCls} value={p.amount} onChange={(ev) => setLocal((prev) => prev.map((x, idx) => idx === i ? { ...x, amount: +ev.target.value } : x))} placeholder="Amount" />
+            <select className={inputCls} value={p.owner_id ?? ""} onChange={(ev) => setLocal((prev) => prev.map((x, idx) => idx === i ? { ...x, owner_id: ev.target.value || null } : x))}>
+              <option value="">No owner</option>
+              {owners.map((o) => (<option key={o.id} value={o.id}>{o.name}</option>))}
+            </select>
+            <div className="flex gap-2">
+              <button onClick={() => save(local[i])} className="flex-1 rounded-md bg-teal px-3 py-2 text-xs font-bold uppercase tracking-wide text-ink">Save</button>
+              <button onClick={() => remove(p.id)} className="rounded-md border border-line px-3 py-2 text-xs text-ember">✕</button>
+            </div>
+          </div>
+        ))}
+        {local.length === 0 && <p className="text-mute">No payouts entered for this season yet.</p>}
+      </div>
+    </div>
+  );
+}
+
+function CostsSection({
+  seasonId,
+  owners,
+  costs,
+  onChange,
+  setMsg,
+}: {
+  seasonId: string;
+  owners: Owner[];
+  costs: SeasonCost[];
+  onChange: () => void;
+  setMsg: (m: string) => void;
+}) {
+  async function add() {
+    const { error } = await supabase.from("season_costs").insert({ season_id: seasonId, description: "New Cost", amount: 0, sort_order: costs.length });
+    setMsg(error ? `Error: ${error.message}` : "Added.");
+    onChange();
+  }
+  async function save(c: SeasonCost) {
+    const { id, ...rest } = c;
+    const { error } = await supabase.from("season_costs").update(rest).eq("id", id);
+    setMsg(error ? `Error: ${error.message}` : "Saved.");
+  }
+  async function remove(id: string) {
+    await supabase.from("season_costs").delete().eq("id", id);
+    onChange();
+  }
+  const [local, setLocal] = useState<SeasonCost[]>(costs);
+  useEffect(() => { setLocal(costs); }, [costs]);
+
+  return (
+    <div>
+      <button onClick={add} className="mb-4 rounded-md bg-teal px-4 py-2 text-xs font-bold uppercase tracking-wide text-ink">
+        + Add Cost
+      </button>
+      <div className="space-y-3">
+        {local.map((c, i) => (
+          <div key={c.id} className="stat-card grid gap-2 rounded-xl p-4 sm:grid-cols-4">
+            <input className={inputCls} value={c.description} onChange={(ev) => setLocal((prev) => prev.map((x, idx) => idx === i ? { ...x, description: ev.target.value } : x))} placeholder="Description (e.g. Parlays)" />
+            <input type="number" className={inputCls} value={c.amount} onChange={(ev) => setLocal((prev) => prev.map((x, idx) => idx === i ? { ...x, amount: +ev.target.value } : x))} placeholder="Amount" />
+            <select className={inputCls} value={c.paid_by_owner_id ?? ""} onChange={(ev) => setLocal((prev) => prev.map((x, idx) => idx === i ? { ...x, paid_by_owner_id: ev.target.value || null } : x))}>
+              <option value="">Paid by (no owner)</option>
+              {owners.map((o) => (<option key={o.id} value={o.id}>{o.name}</option>))}
+            </select>
+            <div className="flex gap-2">
+              <button onClick={() => save(local[i])} className="flex-1 rounded-md bg-teal px-3 py-2 text-xs font-bold uppercase tracking-wide text-ink">Save</button>
+              <button onClick={() => remove(c.id)} className="rounded-md border border-line px-3 py-2 text-xs text-ember">✕</button>
+            </div>
+          </div>
+        ))}
+        {local.length === 0 && <p className="text-mute">No costs entered for this season yet.</p>}
       </div>
     </div>
   );

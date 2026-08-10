@@ -1,5 +1,7 @@
 import { supabase, Owner, Season, SeasonResult } from "@/lib/supabase";
 import CareerStatsTable, { CareerRow } from "@/components/CareerStatsTable";
+import RecordsTabs from "@/components/RecordsTabs";
+import SeasonsBrowser from "@/components/SeasonsBrowser";
 
 export const revalidate = 0;
 
@@ -133,6 +135,29 @@ export default async function RecordsPage() {
     }
   }
 
+  // Worst single-season record: fewest wins, tiebroken by worst win% then fewest points for.
+  let worstSeason: SeasonResult | null = null;
+  for (const r of results ?? []) {
+    if (!worstSeason) { worstSeason = r; continue; }
+    const games = r.wins + r.losses + r.ties;
+    const worstGames = worstSeason.wins + worstSeason.losses + worstSeason.ties;
+    const pct = games > 0 ? r.wins / games : 0;
+    const worstPct = worstGames > 0 ? worstSeason.wins / worstGames : 0;
+    if (
+      r.wins < worstSeason.wins ||
+      (r.wins === worstSeason.wins && pct < worstPct) ||
+      (r.wins === worstSeason.wins && pct === worstPct && Number(r.points_for) < Number(worstSeason.points_for))
+    ) {
+      worstSeason = r;
+    }
+  }
+
+  // Fewest points scored in a single season.
+  let leastScoringSeason: SeasonResult | null = null;
+  for (const r of results ?? []) {
+    if (!leastScoringSeason || Number(r.points_for) < Number(leastScoringSeason.points_for)) leastScoringSeason = r;
+  }
+
   const computedRecords = [
     {
       title: "Best Single-Season Record",
@@ -142,11 +167,25 @@ export default async function RecordsPage() {
       subtitle: bestSeason ? seasonMap.get(bestSeason.season_id)?.year : undefined,
     },
     {
+      title: "Worst Single-Season Record",
+      value: worstSeason
+        ? `${ownerMap.get(worstSeason.owner_id)?.name} — ${worstSeason.wins}-${worstSeason.losses}${worstSeason.ties ? `-${worstSeason.ties}` : ""}`
+        : null,
+      subtitle: worstSeason ? seasonMap.get(worstSeason.season_id)?.year : undefined,
+    },
+    {
       title: "Most Points in a Season",
       value: topScoringSeason
         ? `${ownerMap.get(topScoringSeason.owner_id)?.name} — ${Number(topScoringSeason.points_for).toFixed(1)}`
         : null,
       subtitle: topScoringSeason ? seasonMap.get(topScoringSeason.season_id)?.year : undefined,
+    },
+    {
+      title: "Fewest Points in a Season",
+      value: leastScoringSeason
+        ? `${ownerMap.get(leastScoringSeason.owner_id)?.name} — ${Number(leastScoringSeason.points_for).toFixed(1)}`
+        : null,
+      subtitle: leastScoringSeason ? seasonMap.get(leastScoringSeason.season_id)?.year : undefined,
     },
     {
       title: "Longest Championship Drought",
@@ -158,9 +197,17 @@ export default async function RecordsPage() {
   // Anything hand-added in Admin > Records beyond the auto-computed cards
   // above still shows below (e.g. Biggest Blowout, once weekly scores are
   // ever entered — that one needs game-level data this site doesn't track).
-  const extraManualRecords = (manualRecords ?? []).filter(
-    (r) => !["Best Single-Season Record", "Most Points in a Season", "Longest Championship Drought"].includes(r.title)
-  );
+  // The original seed placeholders are filtered out entirely since they're
+  // either redundant with the leaderboards above or now computed here.
+  const seedTitles = [
+    "Most Championships",
+    "Most Runner-Up Finishes",
+    "Best Single-Season Record",
+    "Biggest Blowout",
+    "Most Points in a Season",
+    "Longest Championship Drought",
+  ];
+  const extraManualRecords = (manualRecords ?? []).filter((r) => !seedTitles.includes(r.title));
 
   return (
     <div>
@@ -168,53 +215,62 @@ export default async function RecordsPage() {
       <p className="mt-2 text-mute">The Greaze record book, built from every season on file.</p>
       <div className="divider-tentacle my-6" />
 
-      <div className="grid gap-6 sm:grid-cols-2">
-        <Leaderboard title="Most Championships" tone="gold" rows={champs} />
-        <Leaderboard title="Most Runner-Up Finishes" tone="teal" rows={runnerUps} />
-        <Leaderboard title="Most Regular Season Titles" tone="teal" rows={regSeason} />
-        <Leaderboard title="Most Toilet Bowl Finishes" tone="ember" rows={toiletBowls} />
-      </div>
+      <RecordsTabs
+        seasonsTab={<SeasonsBrowser seasons={seasons ?? []} owners={owners ?? []} results={results ?? []} />}
+        overview={
+          <>
+            <h2 className="font-display text-2xl tracking-wide text-bone">Career Stats — All Teams</h2>
+            <p className="mt-1 text-sm text-mute">
+              Cumulative totals across every season entered. Click any column to sort.
+            </p>
+            <div className="divider-tentacle my-4" />
+            <CareerStatsTable rows={careerRows} />
 
-      <h2 className="mt-14 font-display text-2xl tracking-wide text-bone">Career Stats — All Teams</h2>
-      <p className="mt-1 text-sm text-mute">
-        Cumulative totals across every season entered. Click any column to sort.
-      </p>
-      <div className="divider-tentacle my-4" />
-      <CareerStatsTable rows={careerRows} />
-
-      <h2 className="mt-14 font-display text-2xl tracking-wide text-bone">Record Book</h2>
-      <p className="mt-1 text-sm text-mute">
-        Computed automatically from every season's standings on file.
-      </p>
-      <div className="divider-tentacle my-4" />
-      <div className="grid gap-4 sm:grid-cols-2">
-        {computedRecords.map((r) => (
-          <div key={r.title} className="stat-card rounded-xl p-5">
-            <div className="text-xs font-semibold uppercase tracking-widest text-teal">{r.title}</div>
-            <div className="mt-1 font-display text-xl text-bone">{r.value ?? "Not enough data yet"}</div>
-            {r.subtitle && <div className="text-xs text-mute">{r.subtitle}</div>}
-          </div>
-        ))}
-        <div className="stat-card rounded-xl p-5">
-          <div className="text-xs font-semibold uppercase tracking-widest text-teal">Biggest Blowout</div>
-          <div className="mt-1 font-display text-xl text-bone">Not available</div>
-          <p className="mt-2 text-sm text-mute">
-            Needs individual weekly matchup scores, which aren&apos;t tracked here — only season-ending
-            standings are. Add game data and a table for it later if you want this one.
-          </p>
-        </div>
-        {extraManualRecords.map((r) => (
-          <div key={r.id} className="stat-card rounded-xl p-5">
-            <div className="text-xs font-semibold uppercase tracking-widest text-teal">{r.title}</div>
-            <div className="mt-1 font-display text-xl text-bone">
-              {r.holder_id ? ownerMap.get(r.holder_id)?.name : r.value ?? "Not yet set"}
-              {r.value && r.holder_id ? ` — ${r.value}` : ""}
+            <h2 className="mt-14 font-display text-2xl tracking-wide text-bone">Leaderboards</h2>
+            <div className="divider-tentacle my-4" />
+            <div className="grid gap-6 sm:grid-cols-2">
+              <Leaderboard title="Most Championships" tone="gold" rows={champs} />
+              <Leaderboard title="Most Runner-Up Finishes" tone="teal" rows={runnerUps} />
+              <Leaderboard title="Most Regular Season Titles" tone="teal" rows={regSeason} />
+              <Leaderboard title="Most Toilet Bowl Finishes" tone="ember" rows={toiletBowls} />
             </div>
-            {r.season_year && <div className="text-xs text-mute">{r.season_year}</div>}
-            {r.description && <p className="mt-2 text-sm text-mute">{r.description}</p>}
-          </div>
-        ))}
-      </div>
+
+            <h2 className="mt-14 font-display text-2xl tracking-wide text-bone">Record Book</h2>
+            <p className="mt-1 text-sm text-mute">
+              Computed automatically from every season's standings on file.
+            </p>
+            <div className="divider-tentacle my-4" />
+            <div className="grid gap-4 sm:grid-cols-2">
+              {computedRecords.map((r) => (
+                <div key={r.title} className="stat-card rounded-xl p-5">
+                  <div className="text-xs font-semibold uppercase tracking-widest text-teal">{r.title}</div>
+                  <div className="mt-1 font-display text-xl text-bone">{r.value ?? "Not enough data yet"}</div>
+                  {r.subtitle && <div className="text-xs text-mute">{r.subtitle}</div>}
+                </div>
+              ))}
+              <div className="stat-card rounded-xl p-5">
+                <div className="text-xs font-semibold uppercase tracking-widest text-teal">Biggest Blowout</div>
+                <div className="mt-1 font-display text-xl text-bone">Not available</div>
+                <p className="mt-2 text-sm text-mute">
+                  Needs individual weekly matchup scores, which aren&apos;t tracked here — only season-ending
+                  standings are. Add game data and a table for it later if you want this one.
+                </p>
+              </div>
+              {extraManualRecords.map((r) => (
+                <div key={r.id} className="stat-card rounded-xl p-5">
+                  <div className="text-xs font-semibold uppercase tracking-widest text-teal">{r.title}</div>
+                  <div className="mt-1 font-display text-xl text-bone">
+                    {r.holder_id ? ownerMap.get(r.holder_id)?.name : r.value ?? "Not yet set"}
+                    {r.value && r.holder_id ? ` — ${r.value}` : ""}
+                  </div>
+                  {r.season_year && <div className="text-xs text-mute">{r.season_year}</div>}
+                  {r.description && <p className="mt-2 text-sm text-mute">{r.description}</p>}
+                </div>
+              ))}
+            </div>
+          </>
+        }
+      />
     </div>
   );
 }

@@ -67,9 +67,50 @@ export type RosterEntry = {
   nfl_team: string | null;
   keeper_eligible: boolean;
   keeper_round: number | null;
+  keeper_selected: boolean;
   is_free_agent: boolean;
   notes: string | null;
   sort_order: number;
+};
+
+export type FinanceEntry = {
+  id: string;
+  season_id: string;
+  owner_id: string;
+  entry_fee: number;
+  faab_spend: number;
+  loser_weeks: number;
+  loser_penalty: number;
+  winner_weeks: number;
+  winner_bonus: number;
+  amount_paid: number;
+  notes: string | null;
+};
+
+export type SeasonPayout = {
+  id: string;
+  season_id: string;
+  title: string;
+  amount: number;
+  owner_id: string | null;
+  sort_order: number;
+};
+
+export type SeasonCost = {
+  id: string;
+  season_id: string;
+  description: string;
+  amount: number;
+  paid_by_owner_id: string | null;
+  sort_order: number;
+};
+
+export type WeeklyResult = {
+  id: string;
+  season_id: string;
+  week: number;
+  winner_owner_id: string | null;
+  loser_owner_id: string | null;
 };
 
 export type Draft = {

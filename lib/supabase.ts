@@ -73,6 +73,38 @@ export type RosterEntry = {
   sort_order: number;
 };
 
+export type FinanceEntry = {
+  id: string;
+  season_id: string;
+  owner_id: string;
+  entry_fee: number;
+  faab_spend: number;
+  loser_weeks: number;
+  loser_penalty: number;
+  winner_weeks: number;
+  winner_bonus: number;
+  amount_paid: number;
+  notes: string | null;
+};
+
+export type SeasonPayout = {
+  id: string;
+  season_id: string;
+  title: string;
+  amount: number;
+  owner_id: string | null;
+  sort_order: number;
+};
+
+export type SeasonCost = {
+  id: string;
+  season_id: string;
+  description: string;
+  amount: number;
+  paid_by_owner_id: string | null;
+  sort_order: number;
+};
+
 export type Draft = {
   id: string;
   season_id: string;

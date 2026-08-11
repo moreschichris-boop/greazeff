@@ -1,86 +1,105 @@
 import Link from "next/link";
-import Image from "next/image";
-import { notFound } from "next/navigation";
-import { supabase } from "@/lib/supabase";
+import { supabase, Owner, Season } from "@/lib/supabase";
 import SquidMark from "@/components/SquidMark";
 
 export const revalidate = 0;
 
-export default async function OwnerProfilePage({ params }: { params: { slug: string } }) {
-  const { data: owner } = await supabase.from("owners").select("*").eq("slug", params.slug).single();
-  if (!owner) return notFound();
+export default async function HomePage() {
+  const { data: owners } = await supabase.from("owners").select("*");
+  const { data: seasons } = await supabase
+    .from("seasons")
+    .select("*")
+    .order("year", { ascending: false });
 
-  const { data: seasons } = await supabase.from("seasons").select("*");
-  const champs = (seasons ?? []).filter((s) => s.champion_id === owner.id);
-  const runnerUps = (seasons ?? []).filter((s) => s.runner_up_id === owner.id);
-  const regSeasons = (seasons ?? []).filter((s) => s.reg_season_winner_id === owner.id);
-  const toiletBowls = (seasons ?? []).filter((s) => s.last_place_id === owner.id);
+  const ownerMap = new Map<string, Owner>((owners ?? []).map((o) => [o.id, o]));
+  const latest: Season | undefined = seasons?.[0];
+  const yearsRunning = seasons?.length ?? 0;
 
-  const questionnaire = owner.questionnaire ?? [];
+  const champCounts = new Map<string, number>();
+  for (const s of seasons ?? []) {
+    if (s.champion_id) champCounts.set(s.champion_id, (champCounts.get(s.champion_id) ?? 0) + 1);
+  }
+  const topChamps = [...champCounts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([id, count]) => ({ owner: ownerMap.get(id), count }));
 
   return (
-    <div>
-      <Link href="/owners" className="text-sm font-semibold text-teal hover:underline">
-        &larr; All owners
-      </Link>
-
-      <div className="mt-4 flex flex-col items-center gap-5 text-center">
-        {owner.photo_url ? (
-          <div className="relative aspect-square w-full max-w-xl overflow-hidden rounded-xl bg-panel ring-4 ring-teal/60">
-            <Image
-              src={owner.photo_url}
-              alt={owner.name}
-              fill
-              className="object-contain"
-              sizes="(min-width: 1280px) 576px, 90vw"
-              priority
-            />
-          </div>
-        ) : (
-          <div className="ring-4 ring-teal/60 rounded-full">
-            <SquidMark size={112} />
-          </div>
-        )}
-        <div>
-          <h1 className="font-display text-4xl tracking-wide text-bone">{owner.name}</h1>
-          {owner.team_name && <p className="text-teal">{owner.team_name}</p>}
+    <div className="space-y-16">
+      <section className="relative overflow-hidden rounded-2xl border border-line bg-depth px-6 py-14 text-center sm:px-12">
+        <div className="mx-auto mb-5 w-fit">
+          <SquidMark size={84} />
         </div>
-      </div>
+        <h1 className="font-display text-5xl tracking-wide text-bone sm:text-6xl">
+          THE <span className="text-teal">GREAZE</span> FANTASY FOOTBALL LEAGUE
+        </h1>
+        <p className="mx-auto mt-4 max-w-xl text-mute">
+          {yearsRunning > 0 ? `${yearsRunning} seasons` : "Since 2011"} of glory, heartbreak, and
+          the Toilet Bowl. Twelve owners. One league. All PPR, all business.
+        </p>
+        <div className="mt-8 flex flex-wrap justify-center gap-3">
+          <Link href="/history" className="rounded-md bg-teal px-5 py-2.5 text-sm font-bold uppercase tracking-wide text-ink hover:bg-teal/90">
+            Season History
+          </Link>
+          <Link href="/records" className="rounded-md border border-line px-5 py-2.5 text-sm font-bold uppercase tracking-wide text-bone hover:border-teal hover:text-teal">
+            All-Time Records
+          </Link>
+        </div>
+      </section>
 
-      {owner.bio && <p className="mx-auto mt-6 max-w-2xl text-center text-mute">{owner.bio}</p>}
-
-      <div className="mt-8 grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <MiniStat label="Championships" value={champs.length} tone="gold" />
-        <MiniStat label="Runner-Ups" value={runnerUps.length} />
-        <MiniStat label="Reg. Season Titles" value={regSeasons.length} />
-        <MiniStat label="Toilet Bowls" value={toiletBowls.length} tone="ember" />
-      </div>
-
-      {questionnaire.length > 0 && (
-        <>
-          <h2 className="mt-12 font-display text-2xl tracking-wide text-bone">The Questionnaire</h2>
-          <div className="divider-tentacle my-4" />
-          <div className="space-y-4">
-            {questionnaire.map((q: { question: string; answer: string }, i: number) => (
-              <div key={i} className="stat-card rounded-xl p-5">
-                <div className="text-sm font-semibold text-teal">{q.question}</div>
-                <div className="mt-1 text-bone">{q.answer}</div>
-              </div>
-            ))}
-          </div>
-        </>
+      {latest && (
+        <section className="grid gap-4 sm:grid-cols-3">
+          <StatCard label={`${latest.year} Champion`} value={ownerMap.get(latest.champion_id ?? "")?.name ?? "TBD"} accent="gold" />
+          <StatCard label="Regular Season Winner" value={ownerMap.get(latest.reg_season_winner_id ?? "")?.name ?? "TBD"} accent="teal" />
+          <StatCard label="Toilet Bowl" value={ownerMap.get(latest.last_place_id ?? "")?.name ?? "TBD"} accent="ember" />
+        </section>
       )}
+
+      <section>
+        <div className="mb-6 flex items-center justify-between">
+          <h2 className="font-display text-3xl tracking-wide text-bone">Championship Leaders</h2>
+          <Link href="/records" className="text-sm font-semibold text-teal hover:underline">
+            Full record book &rarr;
+          </Link>
+        </div>
+        <div className="divider-tentacle mb-6" />
+        <div className="grid gap-4 sm:grid-cols-3">
+          {topChamps.map(({ owner, count }, i) => (
+            <div key={owner?.id ?? i} className="stat-card rounded-xl p-5">
+              <div className="text-4xl font-display text-gold">#{i + 1}</div>
+              <div className="mt-2 text-lg font-semibold text-bone">{owner?.name ?? "Unknown"}</div>
+              <div className="text-sm text-mute">{count} championship{count === 1 ? "" : "s"}</div>
+            </div>
+          ))}
+          {topChamps.length === 0 && (
+            <p className="text-mute">No championship data yet — add seasons from the admin panel.</p>
+          )}
+        </div>
+      </section>
+
+      <section className="grid gap-6 sm:grid-cols-2">
+        <QuickLink href="/owners" title="Meet the Owners" desc="Profiles, photos, and the annual questionnaire for all 12 franchises." />
+        <QuickLink href="/gallery" title="Photo Gallery" desc="Draft day chaos, trophy presentations, and Toilet Bowl punishments by year." />
+      </section>
     </div>
   );
 }
 
-function MiniStat({ label, value, tone }: { label: string; value: number; tone?: "gold" | "ember" }) {
+function StatCard({ label, value, accent }: { label: string; value: string; accent: "gold" | "teal" | "ember" }) {
+  const colors = { gold: "text-gold", teal: "text-teal", ember: "text-ember" };
   return (
-    <div className="stat-card rounded-xl p-4 text-center">
-      <div className={`font-display text-2xl ${tone === "gold" ? "text-gold" : tone === "ember" ? "text-ember" : "text-bone"}`}>
-        {value}
-      </div>
-      <div className="text-[10px] font-semibold uppercase tracking-widest text-mute">{label}</div>
+    <div className="stat-card rounded-xl p-6 text-center">
+      <div className="text-xs font-semibold uppercase tracking-widest text-mute">{label}</div>
+      <div className={`mt-2 font-display text-2xl ${colors[accent]}`}>{value}</div>
     </div>
+  );
+}
+
+function QuickLink({ href, title, desc }: { href: string; title: string; desc: string }) {
+  return (
+    <Link href={href} className="stat-card block rounded-xl p-6 transition hover:border-teal/60">
+      <h3 className="font-display text-2xl tracking-wide text-bone">{title}</h3>
+      <p className="mt-2 text-sm text-mute">{desc}</p>
+    </Link>
   );
 }

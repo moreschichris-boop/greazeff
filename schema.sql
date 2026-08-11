@@ -115,6 +115,7 @@ create table if not exists roster_entries (
   nfl_team text,
   keeper_eligible boolean default true,
   keeper_round int, -- round it would cost to keep next season; null = not applicable
+  keeper_selected boolean default false, -- which of the eligible players the owner actually chose to keep (max 2, enforced in the UI)
   is_free_agent boolean default false,
   notes text,
   sort_order int default 0
@@ -193,6 +194,87 @@ create policy "Public update photos bucket" on storage.objects
   for update using (bucket_id = 'photos');
 create policy "Public delete photos bucket" on storage.objects
   for delete using (bucket_id = 'photos');
+
+-- Season finances: dues, FAAB fees, weekly high/low bonuses & penalties,
+-- who's paid, plus end-of-season payouts and misc costs (e.g. parlays).
+create table if not exists finance_entries (
+  id uuid primary key default gen_random_uuid(),
+  season_id uuid references seasons(id) on delete cascade,
+  owner_id uuid references owners(id) on delete cascade,
+  entry_fee numeric(7,2) default 0,
+  faab_spend numeric(7,2) default 0,
+  loser_weeks int default 0,
+  loser_penalty numeric(7,2) default 0,
+  winner_weeks int default 0,
+  winner_bonus numeric(7,2) default 0,
+  amount_paid numeric(7,2) default 0,
+  notes text,
+  unique(season_id, owner_id)
+);
+
+create table if not exists season_payouts (
+  id uuid primary key default gen_random_uuid(),
+  season_id uuid references seasons(id) on delete cascade,
+  title text not null, -- '1st Place', '2nd Place', 'Regular Season', 'Last Place', 'Weekly High Total'
+  amount numeric(8,2) default 0,
+  owner_id uuid references owners(id),
+  sort_order int default 0
+);
+
+create table if not exists season_costs (
+  id uuid primary key default gen_random_uuid(),
+  season_id uuid references seasons(id) on delete cascade,
+  description text not null, -- 'Parlays'
+  amount numeric(8,2) default 0,
+  paid_by_owner_id uuid references owners(id),
+  sort_order int default 0
+);
+
+alter table finance_entries enable row level security;
+alter table season_payouts enable row level security;
+alter table season_costs enable row level security;
+
+create policy "public read finance_entries" on finance_entries for select using (true);
+create policy "public write finance_entries" on finance_entries for all using (true) with check (true);
+
+create policy "public read season_payouts" on season_payouts for select using (true);
+create policy "public write season_payouts" on season_payouts for all using (true) with check (true);
+
+create policy "public read season_costs" on season_costs for select using (true);
+create policy "public write season_costs" on season_costs for all using (true) with check (true);
+
+-- Weekly high/low score results — who won and lost the weekly bonus/penalty
+-- pot each week. Drives the "Weekly Winners" list on the Finances page.
+create table if not exists weekly_results (
+  id uuid primary key default gen_random_uuid(),
+  season_id uuid references seasons(id) on delete cascade,
+  week int not null,
+  winner_owner_id uuid references owners(id),
+  loser_owner_id uuid references owners(id),
+  unique(season_id, week)
+);
+
+alter table weekly_results enable row level security;
+create policy "public read weekly_results" on weekly_results for select using (true);
+create policy "public write weekly_results" on weekly_results for all using (true) with check (true);
+
+-- Weekly group parlay: each owner submits their own leg for the week's
+-- combined bet, self-service (no PIN needed, matches the rest of the
+-- site's open-access pattern) so the commissioner isn't texting everyone.
+create table if not exists parlay_picks (
+  id uuid primary key default gen_random_uuid(),
+  season_id uuid references seasons(id) on delete cascade,
+  week int not null,
+  owner_id uuid references owners(id) on delete cascade,
+  pick text not null,
+  odds text,
+  updated_at timestamptz default now(),
+  unique(season_id, week, owner_id)
+);
+
+alter table parlay_picks enable row level security;
+create policy "public read parlay_picks" on parlay_picks for select using (true);
+create policy "public write parlay_picks" on parlay_picks for all using (true) with check (true);
 
 -- Default PIN is "3113" hashed with SHA-256. Change it from the admin panel
 -- once the site is live (Settings tab), or replace the hash below before

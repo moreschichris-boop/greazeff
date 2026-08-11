@@ -1,71 +1,44 @@
-"use client";
-
-import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import Image from "next/image";
-import { supabase, Photo } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase";
+import SquidMark from "@/components/SquidMark";
 
-export default function GalleryPage() {
-  const [photos, setPhotos] = useState<Photo[]>([]);
-  const [year, setYear] = useState<string>("all");
-  const [loading, setLoading] = useState(true);
+export const revalidate = 0;
 
-  useEffect(() => {
-    supabase
-      .from("photos")
-      .select("*")
-      .order("season_year", { ascending: false })
-      .order("sort_order", { ascending: true })
-      .then(({ data }) => {
-        setPhotos(data ?? []);
-        setLoading(false);
-      });
-  }, []);
-
-  const years = useMemo(() => {
-    const set = new Set(photos.map((p) => p.season_year));
-    return ["all", ...[...set].sort().reverse()];
-  }, [photos]);
-
-  const filtered = year === "all" ? photos : photos.filter((p) => p.season_year === year);
+export default async function OwnersPage() {
+  const { data: owners } = await supabase.from("owners").select("*").order("sort_order", { ascending: true });
 
   return (
     <div>
-      <h1 className="font-display text-4xl tracking-wide text-bone">Photo Gallery</h1>
-      <p className="mt-2 text-mute">Draft nights, trophy ceremonies, and Toilet Bowl consequences.</p>
+      <h1 className="font-display text-4xl tracking-wide text-bone">The Owners</h1>
+      <p className="mt-2 text-mute">Twelve franchises. Twelve egos. One league.</p>
       <div className="divider-tentacle my-6" />
 
-      <div className="mb-6 flex flex-wrap gap-2">
-        {years.map((y) => (
-          <button
-            key={y}
-            onClick={() => setYear(y)}
-            className={`rounded-md px-3 py-1.5 text-xs font-semibold uppercase tracking-wide ${
-              year === y ? "bg-teal text-ink" : "border border-line text-mute hover:text-bone"
-            }`}
-          >
-            {y === "all" ? "All Years" : y}
-          </button>
-        ))}
-      </div>
-
-      {loading && <p className="text-mute">Loading photos&hellip;</p>}
-
-      {!loading && filtered.length === 0 && (
-        <p className="text-mute">No photos yet — add them from the admin panel.</p>
-      )}
-
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
-        {filtered.map((p) => (
-          <figure key={p.id} className="stat-card overflow-hidden rounded-xl">
-            <div className="relative aspect-square w-full">
-              <Image src={p.url} alt={p.caption ?? p.season_year} fill className="object-cover" />
+      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+        {(owners ?? []).map((o) => (
+          <Link key={o.id} href={`/owners/${o.slug}`} className="stat-card group rounded-xl p-5 transition hover:border-teal/60">
+            <div className="flex items-center gap-4">
+              {o.photo_url ? (
+                <Image
+                  src={o.photo_url}
+                  alt={o.name}
+                  width={64}
+                  height={64}
+                  className="h-16 w-16 rounded-full object-cover ring-2 ring-line group-hover:ring-teal"
+                />
+              ) : (
+                <div className="ring-2 ring-line group-hover:ring-teal rounded-full">
+                  <SquidMark size={64} />
+                </div>
+              )}
+              <div>
+                <div className="font-display text-xl text-bone">{o.name}</div>
+                {o.team_name && <div className="text-sm text-teal">{o.team_name}</div>}
+              </div>
             </div>
-            <figcaption className="px-3 py-2 text-xs text-mute">
-              <span className="font-semibold text-teal">{p.season_year}</span>
-              {p.caption ? ` — ${p.caption}` : ""}
-            </figcaption>
-          </figure>
+          </Link>
         ))}
+        {(!owners || owners.length === 0) && <p className="text-mute">No owners yet — add them from the admin panel.</p>}
       </div>
     </div>
   );

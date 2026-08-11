@@ -113,6 +113,16 @@ export type WeeklyResult = {
   loser_owner_id: string | null;
 };
 
+export type ParlayPick = {
+  id: string;
+  season_id: string;
+  week: number;
+  owner_id: string;
+  pick: string;
+  odds: string | null;
+  updated_at: string;
+};
+
 export type Draft = {
   id: string;
   season_id: string;

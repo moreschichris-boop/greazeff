@@ -1,454 +1,153 @@
-"use client";
+-- Pre-seeds the 2026-27 player pool with a starter list (~180 players),
+-- ranked in a sensible order, so the draft is ready to go without anyone
+-- needing to paste a list first. Safe to run once.
 
-import { useEffect, useMemo, useState } from "react";
-import { supabase, Owner, Draft, DraftPick, Season, DraftPlayer } from "@/lib/supabase";
-import { teamOrderForRound, ownerForPick, totalPicks } from "@/lib/draft";
-
-export default function DraftBoardPage() {
-  const [seasons, setSeasons] = useState<Season[]>([]);
-  const [seasonId, setSeasonId] = useState<string>("");
-  const [draft, setDraft] = useState<Draft | null>(null);
-  const [owners, setOwners] = useState<Owner[]>([]);
-  const [picks, setPicks] = useState<DraftPick[]>([]);
-  const [pool, setPool] = useState<DraftPlayer[]>([]);
-  const [posFilter, setPosFilter] = useState("ALL");
-  const [search, setSearch] = useState("");
-  const [loading, setLoading] = useState(true);
-
-  const [whoAmI, setWhoAmI] = useState("");
-  const [pickName, setPickName] = useState("");
-  const [pickPos, setPickPos] = useState("");
-  const [pickTeam, setPickTeam] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [pickMsg, setPickMsg] = useState("");
-
-  useEffect(() => {
-    (async () => {
-      const { data: o } = await supabase.from("owners").select("*").order("sort_order", { ascending: true });
-      const { data: s } = await supabase.from("seasons").select("*").order("year", { ascending: false });
-      setOwners(o ?? []);
-      setSeasons(s ?? []);
-      if (s && s.length) setSeasonId(s[0].id);
-      setLoading(false);
-    })();
-  }, []);
-
-  useEffect(() => {
-    if (!seasonId) return;
-    let cancelled = false;
-
-    async function loadDraft() {
-      const { data: d } = await supabase.from("drafts").select("*").eq("season_id", seasonId).maybeSingle();
-      if (cancelled) return;
-      setDraft(d ?? null);
-      if (d) {
-        const { data: p } = await supabase
-          .from("draft_picks")
-          .select("*")
-          .eq("draft_id", d.id)
-          .order("pick_number", { ascending: true });
-        if (!cancelled) setPicks(p ?? []);
-      } else {
-        setPicks([]);
-      }
-    }
-    loadDraft();
-
-    return () => { cancelled = true; };
-  }, [seasonId]);
-
-  const season = seasons.find((s) => s.id === seasonId);
-
-  useEffect(() => {
-    if (!season) return;
-    let cancelled = false;
-    supabase.from("draft_players").select("*").eq("season_year", season.year).then(({ data }) => {
-      if (!cancelled) setPool(data ?? []);
-    });
-    return () => { cancelled = true; };
-  }, [season?.year]);
-
-  // Realtime: live-update the pool as players get drafted, from any device.
-  useEffect(() => {
-    if (!season) return;
-    const channel = supabase
-      .channel(`draft-players-${season.year}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "draft_players", filter: `season_year=eq.${season.year}` }, (payload) => {
-        setPool((prev) => {
-          if (payload.eventType === "INSERT") {
-            const row = payload.new as DraftPlayer;
-            if (prev.some((p) => p.id === row.id)) return prev;
-            return [...prev, row];
-          }
-          if (payload.eventType === "DELETE") return prev.filter((p) => p.id !== (payload.old as DraftPlayer).id);
-          if (payload.eventType === "UPDATE") {
-            const row = payload.new as DraftPlayer;
-            return prev.map((p) => (p.id === row.id ? row : p));
-          }
-          return prev;
-        });
-      })
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [season?.year]);
-
-  // Realtime: live-update the board as picks are made and as the draft's
-  // current_pick / status changes, from any device.
-  useEffect(() => {
-    if (!draft?.id) return;
-
-    const channel = supabase
-      .channel(`draft-${draft.id}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "draft_picks", filter: `draft_id=eq.${draft.id}` }, (payload) => {
-        setPicks((prev) => {
-          if (payload.eventType === "INSERT") {
-            const row = payload.new as DraftPick;
-            if (prev.some((p) => p.id === row.id)) return prev;
-            return [...prev, row].sort((a, b) => a.pick_number - b.pick_number);
-          }
-          if (payload.eventType === "DELETE") {
-            return prev.filter((p) => p.id !== (payload.old as DraftPick).id);
-          }
-          if (payload.eventType === "UPDATE") {
-            const row = payload.new as DraftPick;
-            return prev.map((p) => (p.id === row.id ? row : p));
-          }
-          return prev;
-        });
-      })
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "drafts", filter: `id=eq.${draft.id}` }, (payload) => {
-        setDraft(payload.new as Draft);
-      })
-      .subscribe();
-
-    return () => { supabase.removeChannel(channel); };
-  }, [draft?.id]);
-
-  const ownerMap = useMemo(() => new Map(owners.map((o) => [o.id, o])), [owners]);
-  const pickMap = useMemo(() => new Map(picks.map((p) => [p.pick_number, p])), [picks]);
-
-  const onClock = draft && draft.status === "in_progress" ? ownerForPick(draft.draft_order, draft.current_pick) : null;
-
-  const available = pool.filter((p) => !p.drafted);
-  const positions = ["ALL", ...Array.from(new Set(available.map((p) => p.position).filter(Boolean) as string[])).sort()];
-  const bestAvailable = available
-    .filter((p) => posFilter === "ALL" || p.position === posFilter)
-    .filter((p) => !search || p.name.toLowerCase().includes(search.toLowerCase()))
-    .sort((a, b) => (a.rank ?? 9999) - (b.rank ?? 9999));
-
-  const totalPickCount = draft ? totalPicks(draft.draft_order, draft.rounds) : 0;
-
-  function quickFill(p: DraftPlayer) {
-    setPickName(p.name);
-    setPickPos(p.position ?? "");
-    setPickTeam(p.nfl_team ?? "");
-  }
-
-  async function submitPick() {
-    if (!draft || !onClock) return;
-    if (whoAmI !== onClock.ownerId) return setPickMsg("It's not your turn yet.");
-    if (!pickName.trim()) return setPickMsg("Enter a player name.");
-    setSubmitting(true);
-    setPickMsg("");
-
-    const matched = pool.find((p) => p.name.toLowerCase() === pickName.trim().toLowerCase());
-    const { error } = await supabase.from("draft_picks").insert({
-      draft_id: draft.id,
-      pick_number: draft.current_pick,
-      round: onClock.round,
-      pick_in_round: onClock.pickInRound,
-      owner_id: onClock.ownerId,
-      player_name: pickName.trim(),
-      position: pickPos || null,
-      nfl_team: pickTeam || null,
-      is_keeper: false,
-    });
-    if (error) {
-      setSubmitting(false);
-      return setPickMsg(`Error: ${error.message}`);
-    }
-    if (matched) await supabase.from("draft_players").update({ drafted: true }).eq("id", matched.id);
-
-    const nextPick = draft.current_pick + 1;
-    const newStatus = nextPick > totalPickCount ? "complete" : "in_progress";
-    await supabase.from("drafts").update({ current_pick: nextPick, status: newStatus }).eq("id", draft.id);
-
-    setPickName("");
-    setPickPos("");
-    setPickTeam("");
-    setSubmitting(false);
-  }
-
-  if (loading) return <p className="text-mute">Loading...</p>;
-
-  return (
-    <div>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="font-display text-4xl tracking-wide text-bone">Live Draft Board</h1>
-        <select
-          className="rounded-md border border-line bg-panel px-3 py-2 text-sm text-bone"
-          value={seasonId}
-          onChange={(e) => setSeasonId(e.target.value)}
-        >
-          {seasons.map((s) => (
-            <option key={s.id} value={s.id}>{s.year}</option>
-          ))}
-        </select>
-      </div>
-      <div className="divider-tentacle my-6" />
-
-      {!draft && <p className="text-mute">No draft set up for this season yet.</p>}
-
-      {draft && (
-        <>
-          {draft.status === "setup" && (
-            <DraftCountdown scheduledAt={draft.scheduled_at} />
-          )}
-
-          {draft.status === "in_progress" && onClock && (
-            <div className="stat-card mb-8 flex flex-wrap items-center justify-between gap-3 rounded-xl border-teal/60 p-5">
-              <div>
-                <div className="text-xs font-semibold uppercase tracking-widest text-mute">
-                  On the Clock &middot; Round {onClock.round}, Pick {onClock.pickInRound}
-                </div>
-                <div className="font-display text-2xl text-teal">{ownerMap.get(onClock.ownerId)?.name ?? "—"}</div>
-              </div>
-              <div className="text-sm text-mute">
-                Pick {draft.current_pick} of {totalPicks(draft.draft_order, draft.rounds)}
-              </div>
-            </div>
-          )}
-
-          {draft.status === "in_progress" && onClock && (
-            <div className="stat-card mb-8 rounded-xl p-5">
-              <h2 className="mb-3 font-display text-lg text-teal">Make Your Pick</h2>
-              <select
-                className="mb-3 w-full max-w-xs rounded-md border border-line bg-panel px-3 py-2 text-sm text-bone"
-                value={whoAmI}
-                onChange={(e) => setWhoAmI(e.target.value)}
-              >
-                <option value="">Who are you?</option>
-                {owners.map((o) => (<option key={o.id} value={o.id}>{o.name}</option>))}
-              </select>
-
-              {whoAmI && whoAmI !== onClock.ownerId && (
-                <p className="text-sm text-mute">
-                  Not your turn — waiting on <span className="text-teal">{ownerMap.get(onClock.ownerId)?.name}</span>.
-                </p>
-              )}
-
-              {whoAmI && whoAmI === onClock.ownerId && (
-                <>
-                  {pickMsg && <p className="mb-2 text-sm text-ember">{pickMsg}</p>}
-                  <div className="grid gap-2 sm:grid-cols-4">
-                    <input
-                      className="rounded-md border border-line bg-panel px-3 py-2 text-sm text-bone sm:col-span-2"
-                      placeholder="Player name"
-                      value={pickName}
-                      onChange={(e) => setPickName(e.target.value)}
-                    />
-                    <input
-                      className="rounded-md border border-line bg-panel px-3 py-2 text-sm text-bone"
-                      placeholder="Position"
-                      value={pickPos}
-                      onChange={(e) => setPickPos(e.target.value)}
-                    />
-                    <input
-                      className="rounded-md border border-line bg-panel px-3 py-2 text-sm text-bone"
-                      placeholder="NFL team"
-                      value={pickTeam}
-                      onChange={(e) => setPickTeam(e.target.value)}
-                    />
-                  </div>
-                  {pool.length > 0 && (
-                    <div className="mt-2 max-h-40 overflow-y-auto">
-                      <div className="grid gap-1 sm:grid-cols-3">
-                        {bestAvailable.slice(0, 30).map((p) => (
-                          <button
-                            key={p.id}
-                            onClick={() => quickFill(p)}
-                            className="flex items-center justify-between rounded border border-line px-2 py-1 text-left text-xs text-mute hover:border-teal hover:text-teal"
-                          >
-                            <span className="text-bone">{p.name}</span>
-                            <span>{p.position}</span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  <button
-                    disabled={submitting}
-                    onClick={submitPick}
-                    className="mt-3 rounded-md bg-teal px-4 py-2 text-xs font-bold uppercase tracking-wide text-ink disabled:opacity-50"
-                  >
-                    {submitting ? "Saving..." : "Submit Pick"}
-                  </button>
-                </>
-              )}
-            </div>
-          )}
-
-          {draft.status === "complete" && (
-            <div className="stat-card mb-8 rounded-xl p-5 text-center">
-              <div className="font-display text-2xl text-gold">Draft Complete</div>
-            </div>
-          )}
-
-          {pool.length > 0 && (
-            <div className="stat-card mb-8 rounded-xl p-5">
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                <h2 className="font-display text-xl text-bone">Best Available</h2>
-                <span className="text-xs text-mute">{available.length} players left</span>
-              </div>
-              <div className="mb-3 flex flex-wrap items-center gap-2">
-                <input
-                  className="rounded-md border border-line bg-panel px-3 py-1.5 text-sm text-bone outline-none focus:border-teal"
-                  placeholder="Search players..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                />
-                {positions.map((pos) => (
-                  <button
-                    key={pos}
-                    onClick={() => setPosFilter(pos)}
-                    className={`rounded px-2 py-1 text-xs font-semibold uppercase ${
-                      posFilter === pos ? "bg-teal text-ink" : "border border-line text-mute hover:text-bone"
-                    }`}
-                  >
-                    {pos}
-                  </button>
-                ))}
-              </div>
-              <div className="grid max-h-72 gap-1 overflow-y-auto sm:grid-cols-3">
-                {bestAvailable.map((p) => (
-                  <div key={p.id} className="flex items-center justify-between rounded border border-line px-2 py-1.5 text-xs">
-                    <span className="text-bone">{p.rank ? `${p.rank}. ` : ""}{p.name}</span>
-                    <span className="text-mute">{[p.position, p.nfl_team].filter(Boolean).join(" · ")}</span>
-                  </div>
-                ))}
-                {bestAvailable.length === 0 && <p className="text-xs text-mute">No matching players.</p>}
-              </div>
-            </div>
-          )}
-
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[900px] border-collapse text-xs">
-              <thead>
-                <tr>
-                  <th className="w-14 border-b border-line py-2 text-left text-mute">Rd</th>
-                  {draft.draft_order.map((ownerId) => (
-                    <th key={ownerId} className="border-b border-line px-2 py-2 text-left font-semibold text-bone">
-                      {ownerMap.get(ownerId)?.name ?? "—"}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {Array.from({ length: draft.rounds }, (_, i) => i + 1).map((round) => {
-                  const order = teamOrderForRound(draft.draft_order, round);
-                  return (
-                    <tr key={round} className="border-b border-line/50">
-                      <td className="py-2 font-display text-base text-mute">{round}</td>
-                      {draft.draft_order.map((colOwnerId) => {
-                        const pickInRound = order.indexOf(colOwnerId) + 1;
-                        const pickNumber = (round - 1) * draft.draft_order.length + pickInRound;
-                        const pick = pickMap.get(pickNumber);
-                        const isOnClock = draft.status === "in_progress" && pickNumber === draft.current_pick;
-                        return (
-                          <td
-                            key={colOwnerId}
-                            className={`px-2 py-2 align-top ${isOnClock ? "bg-teal/10" : ""}`}
-                          >
-                            {pick ? (
-                              <div>
-                                <div className="font-semibold text-bone">{pick.player_name}</div>
-                                <div className="text-mute">
-                                  {[pick.position, pick.nfl_team].filter(Boolean).join(" · ")}
-                                  {pick.is_keeper ? " · Keeper" : ""}
-                                </div>
-                              </div>
-                            ) : isOnClock ? (
-                              <span className="text-teal">on the clock</span>
-                            ) : (
-                              <span className="text-mute">—</span>
-                            )}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-
-          <h2 className="mt-12 font-display text-2xl tracking-wide text-bone">Recent Picks</h2>
-          <div className="divider-tentacle my-4" />
-          <div className="space-y-2">
-            {[...picks].reverse().slice(0, 15).map((p) => (
-              <div key={p.id} className="stat-card flex items-center justify-between rounded-lg px-4 py-2 text-sm">
-                <span className="text-mute">
-                  Pick {p.pick_number} (Rd {p.round})
-                </span>
-                <span className="text-bone">{ownerMap.get(p.owner_id)?.name}</span>
-                <span className="font-semibold text-teal">
-                  {p.player_name}
-                  {p.position ? ` (${p.position})` : ""}
-                </span>
-              </div>
-            ))}
-            {picks.length === 0 && <p className="text-mute">No picks yet.</p>}
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-function DraftCountdown({ scheduledAt }: { scheduledAt: string | null }) {
-  const [now, setNow] = useState(Date.now());
-
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, []);
-
-  if (!scheduledAt) {
-    return (
-      <p className="mb-6 rounded-lg border border-line bg-panel/60 p-4 text-sm text-mute">
-        This draft hasn&apos;t started yet.
-      </p>
-    );
-  }
-
-  const target = new Date(scheduledAt).getTime();
-  const diff = target - now;
-
-  if (diff <= 0) {
-    return (
-      <div className="stat-card mb-6 rounded-xl border-teal/60 p-5 text-center">
-        <div className="font-display text-2xl text-teal">Draft time! Waiting for the commissioner to start it.</div>
-      </div>
-    );
-  }
-
-  const days = Math.floor(diff / 86400000);
-  const hours = Math.floor((diff % 86400000) / 3600000);
-  const minutes = Math.floor((diff % 3600000) / 60000);
-  const seconds = Math.floor((diff % 60000) / 1000);
-
-  return (
-    <div className="stat-card mb-6 rounded-xl border-teal/60 p-5 text-center">
-      <div className="text-xs font-semibold uppercase tracking-widest text-mute">Draft Starts In</div>
-      <div className="mt-2 flex justify-center gap-4 font-display text-3xl text-teal">
-        {days > 0 && <span>{days}d</span>}
-        <span>{String(hours).padStart(2, "0")}h</span>
-        <span>{String(minutes).padStart(2, "0")}m</span>
-        <span>{String(seconds).padStart(2, "0")}s</span>
-      </div>
-      <div className="mt-2 text-xs text-mute">
-        {new Date(scheduledAt).toLocaleString(undefined, { weekday: "long", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
-      </div>
-    </div>
-  );
-}
+insert into draft_players (season_year, name, position, nfl_team, rank)
+select '2026-27', v.name, nullif(v.position, ''), nullif(v.nfl_team, ''), v.rank
+from (values
+  ('Josh Allen', 'QB', 'BUF', 1),
+  ('Lamar Jackson', 'QB', 'BAL', 2),
+  ('Jayden Daniels', 'QB', 'WAS', 3),
+  ('Joe Burrow', 'QB', 'CIN', 4),
+  ('Patrick Mahomes', 'QB', 'KC', 5),
+  ('Jalen Hurts', 'QB', 'PHI', 6),
+  ('Justin Herbert', 'QB', 'LAC', 7),
+  ('Drake Maye', 'QB', 'NE', 8),
+  ('Bo Nix', 'QB', 'DEN', 9),
+  ('Baker Mayfield', 'QB', 'TB', 10),
+  ('Brock Purdy', 'QB', 'SF', 11),
+  ('Jared Goff', 'QB', 'DET', 12),
+  ('Dak Prescott', 'QB', 'DAL', 13),
+  ('Kyler Murray', 'QB', 'ARI', 14),
+  ('Trevor Lawrence', 'QB', 'JAX', 15),
+  ('Matthew Stafford', 'QB', 'LAR', 16),
+  ('Caleb Williams', 'QB', 'CHI', 17),
+  ('Bijan Robinson', 'RB', 'ATL', 18),
+  ('Jahmyr Gibbs', 'RB', 'DET', 19),
+  ('Saquon Barkley', 'RB', 'PHI', 20),
+  ('De''Von Achane', 'RB', 'MIA', 21),
+  ('Ashton Jeanty', 'RB', 'LV', 22),
+  ('Christian McCaffrey', 'RB', 'SF', 23),
+  ('Derrick Henry', 'RB', 'BAL', 24),
+  ('Jonathan Taylor', 'RB', 'IND', 25),
+  ('Josh Jacobs', 'RB', 'GB', 26),
+  ('Kenneth Walker III', 'RB', 'SEA', 27),
+  ('Breece Hall', 'RB', 'NYJ', 28),
+  ('James Cook III', 'RB', 'BUF', 29),
+  ('Chase Brown', 'RB', 'CIN', 30),
+  ('Kyren Williams', 'RB', 'LAR', 31),
+  ('Alvin Kamara', 'RB', 'NO', 32),
+  ('David Montgomery', 'RB', 'DET', 33),
+  ('Omarion Hampton', 'RB', 'LAC', 34),
+  ('TreVeyon Henderson', 'RB', 'NE', 35),
+  ('RJ Harvey', 'RB', 'DEN', 36),
+  ('Chuba Hubbard', 'RB', 'CAR', 37),
+  ('Tony Pollard', 'RB', 'TEN', 38),
+  ('Isiah Pacheco', 'RB', 'KC', 39),
+  ('Bucky Irving', 'RB', 'TB', 40),
+  ('Rhamondre Stevenson', 'RB', 'NE', 41),
+  ('Aaron Jones Sr.', 'RB', 'MIN', 42),
+  ('Javonte Williams', 'RB', 'DAL', 43),
+  ('Rachaad White', 'RB', 'TB', 44),
+  ('Tyrone Tracy Jr.', 'RB', 'NYG', 45),
+  ('Brian Robinson Jr.', 'RB', 'WAS', 46),
+  ('Najee Harris', 'RB', 'LAC', 47),
+  ('Jaylen Warren', 'RB', 'PIT', 48),
+  ('Tyjae Spears', 'RB', 'TEN', 49),
+  ('Nick Chubb', 'RB', 'HOU', 50),
+  ('Cam Skattebo', 'RB', 'NYG', 51),
+  ('Ja''Marr Chase', 'WR', 'CIN', 52),
+  ('Justin Jefferson', 'WR', 'MIN', 53),
+  ('CeeDee Lamb', 'WR', 'DAL', 54),
+  ('Amon-Ra St. Brown', 'WR', 'DET', 55),
+  ('Malik Nabers', 'WR', 'NYG', 56),
+  ('Puka Nacua', 'WR', 'LAR', 57),
+  ('Nico Collins', 'WR', 'HOU', 58),
+  ('Brian Thomas Jr.', 'WR', 'JAX', 59),
+  ('A.J. Brown', 'WR', 'PHI', 60),
+  ('Drake London', 'WR', 'ATL', 61),
+  ('Tyreek Hill', 'WR', 'MIA', 62),
+  ('Marvin Harrison Jr.', 'WR', 'ARI', 63),
+  ('Terry McLaurin', 'WR', 'WAS', 64),
+  ('Chris Olave', 'WR', 'NO', 65),
+  ('DK Metcalf', 'WR', 'PIT', 66),
+  ('Garrett Wilson', 'WR', 'NYJ', 67),
+  ('DJ Moore', 'WR', 'CHI', 68),
+  ('Zay Flowers', 'WR', 'BAL', 69),
+  ('Mike Evans', 'WR', 'TB', 70),
+  ('Davante Adams', 'WR', 'LAR', 71),
+  ('Jaxon Smith-Njigba', 'WR', 'SEA', 72),
+  ('Rashee Rice', 'WR', 'KC', 73),
+  ('Courtland Sutton', 'WR', 'DEN', 74),
+  ('Jameson Williams', 'WR', 'DET', 75),
+  ('Ladd McConkey', 'WR', 'LAC', 76),
+  ('Xavier Worthy', 'WR', 'KC', 77),
+  ('Jordan Addison', 'WR', 'MIN', 78),
+  ('Tetairoa McMillan', 'WR', 'CAR', 79),
+  ('Khalil Shakir', 'WR', 'BUF', 80),
+  ('Stefon Diggs', 'WR', 'NE', 81),
+  ('Jayden Reed', 'WR', 'GB', 82),
+  ('Jerry Jeudy', 'WR', 'CLE', 83),
+  ('George Pickens', 'WR', 'DAL', 84),
+  ('Keon Coleman', 'WR', 'BUF', 85),
+  ('Rome Odunze', 'WR', 'CHI', 86),
+  ('Deebo Samuel', 'WR', 'WAS', 87),
+  ('Jaylen Waddle', 'WR', 'MIA', 88),
+  ('Cooper Kupp', 'WR', 'SEA', 89),
+  ('Zach Charbonnet', 'RB', 'SEA', 90),
+  ('Emeka Egbuka', 'WR', 'TB', 91),
+  ('Travis Hunter', 'WR', 'JAX', 92),
+  ('Quinshon Judkins', 'RB', 'CLE', 93),
+  ('Kaleb Johnson', 'RB', 'PIT', 94),
+  ('Jayden Higgins', 'WR', 'HOU', 95),
+  ('Chris Godwin Jr.', 'WR', 'TB', 96),
+  ('Josh Downs', 'WR', 'IND', 97),
+  ('Wan''Dale Robinson', 'WR', 'NYG', 98),
+  ('Darnell Mooney', 'WR', 'ATL', 99),
+  ('Hollywood Brown', 'WR', 'KC', 100),
+  ('Michael Pittman Jr.', 'WR', 'IND', 101),
+  ('Rashod Bateman', 'WR', 'BAL', 102),
+  ('Jauan Jennings', 'WR', 'SF', 103),
+  ('Jakobi Meyers', 'WR', 'LV', 104),
+  ('Christian Watson', 'WR', 'GB', 105),
+  ('Luther Burden III', 'WR', 'CHI', 106),
+  ('Travis Kelce', 'TE', 'KC', 107),
+  ('Brock Bowers', 'TE', 'LV', 108),
+  ('Trey McBride', 'TE', 'ARI', 109),
+  ('George Kittle', 'TE', 'SF', 110),
+  ('Sam LaPorta', 'TE', 'DET', 111),
+  ('Mark Andrews', 'TE', 'BAL', 112),
+  ('Evan Engram', 'TE', 'DEN', 113),
+  ('David Njoku', 'TE', 'CLE', 114),
+  ('Dallas Goedert', 'TE', 'PHI', 115),
+  ('Jonnu Smith', 'TE', 'PIT', 116),
+  ('Tucker Kraft', 'TE', 'GB', 117),
+  ('T.J. Hockenson', 'TE', 'MIN', 118),
+  ('Colston Loveland', 'TE', 'CHI', 119),
+  ('Kyle Pitts Sr.', 'TE', 'ATL', 120),
+  ('Dalton Kincaid', 'TE', 'BUF', 121),
+  ('Jake Ferguson', 'TE', 'DAL', 122),
+  ('Theo Johnson', 'TE', 'NYG', 123),
+  ('Zach Ertz', 'TE', 'WAS', 124),
+  ('Cade Otton', 'TE', 'TB', 125),
+  ('Tyler Warren', 'TE', 'IND', 126),
+  ('Justin Tucker', 'K', 'BAL', 127),
+  ('Harrison Butker', 'K', 'KC', 128),
+  ('Brandon Aubrey', 'K', 'DAL', 129),
+  ('Chris Boswell', 'K', 'PIT', 130),
+  ('Jake Bates', 'K', 'DET', 131),
+  ('Cameron Dicker', 'K', 'LAC', 132),
+  ('Jason Sanders', 'K', 'MIA', 133),
+  ('Younghoe Koo', 'K', 'ATL', 134),
+  ('Ka''imi Fairbairn', 'K', 'HOU', 135),
+  ('Baltimore Ravens', 'DEF', 'BAL', 136),
+  ('San Francisco 49ers', 'DEF', 'SF', 137),
+  ('Pittsburgh Steelers', 'DEF', 'PIT', 138),
+  ('Denver Broncos', 'DEF', 'DEN', 139),
+  ('Philadelphia Eagles', 'DEF', 'PHI', 140),
+  ('Houston Texans', 'DEF', 'HOU', 141),
+  ('Kansas City Chiefs', 'DEF', 'KC', 142),
+  ('Buffalo Bills', 'DEF', 'BUF', 143),
+  ('Minnesota Vikings', 'DEF', 'MIN', 144),
+  ('Dallas Cowboys', 'DEF', 'DAL', 145)
+) as v(name, position, nfl_team, rank);

@@ -639,6 +639,7 @@ function DraftTab() {
 function DraftSetup({ owners, season, onCreated }: { owners: Owner[]; season: Season; onCreated: () => void }) {
   const [order, setOrder] = useState<string[]>(owners.map((o) => o.id));
   const [rounds, setRounds] = useState(17);
+  const [scheduledAt, setScheduledAt] = useState("");
   const [poolText, setPoolText] = useState("");
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
@@ -660,6 +661,7 @@ function DraftSetup({ owners, season, onCreated }: { owners: Owner[]; season: Se
       draft_order: order,
       status: "setup",
       current_pick: 1,
+      scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : null,
     });
     if (error) {
       setMsg(`Error: ${error.message}`);
@@ -669,9 +671,9 @@ function DraftSetup({ owners, season, onCreated }: { owners: Owner[]; season: Se
 
     const lines = poolText.split("\n").map((l) => l.trim()).filter(Boolean);
     if (lines.length) {
-      const rows = lines.map((line) => {
+      const rows = lines.map((line, idx) => {
         const [name, position, nfl_team] = line.split(",").map((s) => s.trim());
-        return { season_year: season.year, name, position: position || null, nfl_team: nfl_team || null };
+        return { season_year: season.year, name, position: position || null, nfl_team: nfl_team || null, rank: idx + 1 };
       });
       const { error: poolErr } = await supabase.from("draft_players").insert(rows);
       if (poolErr) setMsg(`Draft created, but player pool failed: ${poolErr.message}`);
@@ -689,8 +691,22 @@ function DraftSetup({ owners, season, onCreated }: { owners: Owner[]; season: Se
       </div>
 
       <div>
-        <h3 className="mb-2 font-display text-xl text-bone">2. Draft Order (Round 1)</h3>
-        <p className="mb-2 text-xs text-mute">Snakes automatically each round after this. Use the arrows to reorder.</p>
+        <h3 className="mb-2 font-display text-xl text-bone">2. Draft Start Time (optional)</h3>
+        <p className="mb-2 text-xs text-mute">Powers the live countdown on the public draft page.</p>
+        <input
+          type="datetime-local"
+          className={`${inputCls} max-w-xs`}
+          value={scheduledAt}
+          onChange={(e) => setScheduledAt(e.target.value)}
+        />
+      </div>
+
+      <div>
+        <h3 className="mb-2 font-display text-xl text-bone">3. Draft Order (Round 1)</h3>
+        <p className="mb-2 text-xs text-mute">
+          Snakes automatically each round after this. Use the arrows to reorder, or run the Squid Race first
+          and come back — it can set this order for you.
+        </p>
         <div className="space-y-1">
           {order.map((id, i) => (
             <div key={id} className="stat-card flex items-center justify-between rounded-md px-3 py-2 text-sm">
@@ -705,16 +721,112 @@ function DraftSetup({ owners, season, onCreated }: { owners: Owner[]; season: Se
       </div>
 
       <div>
-        <h3 className="mb-2 font-display text-xl text-bone">3. Player Pool (optional)</h3>
+        <h3 className="mb-2 font-display text-xl text-bone">4. Player Pool (optional)</h3>
         <p className="mb-2 text-xs text-mute">
-          One player per line: <code>Name, Position, Team</code> (position and team are optional). Powers
-          autocomplete during the draft — you can still type any name live even without this.
+          One player per line: <code>Name, Position, Team</code> (position and team are optional). The order
+          you paste them in becomes their rank for sorting — put your best players first. You can still type
+          any name live even without this.
         </p>
         <textarea className={inputCls} rows={6} value={poolText} onChange={(e) => setPoolText(e.target.value)} placeholder={"Ja'Marr Chase, WR, CIN\nBijan Robinson, RB, ATL"} />
       </div>
 
       <button disabled={busy} onClick={create} className="rounded-md bg-teal px-4 py-2 text-xs font-bold uppercase tracking-wide text-ink disabled:opacity-50">
         {busy ? "Creating..." : "Create Draft"}
+      </button>
+    </div>
+  );
+}
+
+function SetupFields({
+  draft,
+  owners,
+  season,
+  onChange,
+  setMsg,
+}: {
+  draft: Draft;
+  owners: Owner[];
+  season: Season;
+  onChange: () => void;
+  setMsg: (m: string) => void;
+}) {
+  const [order, setOrder] = useState<string[]>(draft.draft_order.length ? draft.draft_order : owners.map((o) => o.id));
+  const [rounds, setRounds] = useState(draft.rounds);
+  const [scheduledAt, setScheduledAt] = useState(draft.scheduled_at ? draft.scheduled_at.slice(0, 16) : "");
+  const [poolText, setPoolText] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  function move(i: number, dir: -1 | 1) {
+    const copy = [...order];
+    const j = i + dir;
+    if (j < 0 || j >= copy.length) return;
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+    setOrder(copy);
+  }
+
+  async function save() {
+    setBusy(true);
+    setMsg("");
+    const { error } = await supabase.from("drafts").update({
+      rounds,
+      draft_order: order,
+      scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : null,
+    }).eq("id", draft.id);
+    if (error) { setBusy(false); return setMsg(`Error: ${error.message}`); }
+
+    const lines = poolText.split("\n").map((l) => l.trim()).filter(Boolean);
+    if (lines.length) {
+      const { data: existing } = await supabase.from("draft_players").select("id").eq("season_year", season.year);
+      const startRank = (existing?.length ?? 0) + 1;
+      const rows = lines.map((line, idx) => {
+        const [name, position, nfl_team] = line.split(",").map((s) => s.trim());
+        return { season_year: season.year, name, position: position || null, nfl_team: nfl_team || null, rank: startRank + idx };
+      });
+      const { error: poolErr } = await supabase.from("draft_players").insert(rows);
+      if (poolErr) { setBusy(false); return setMsg(`Saved, but player pool failed: ${poolErr.message}`); }
+      setPoolText("");
+    }
+    setBusy(false);
+    setMsg("Saved.");
+    onChange();
+  }
+
+  return (
+    <div className="stat-card space-y-5 rounded-xl p-5">
+      <div>
+        <h3 className="mb-2 text-sm font-semibold uppercase tracking-widest text-teal">Rounds</h3>
+        <input type="number" className={`${inputCls} max-w-[120px]`} value={rounds} onChange={(e) => setRounds(+e.target.value)} />
+      </div>
+
+      <div>
+        <h3 className="mb-2 text-sm font-semibold uppercase tracking-widest text-teal">Draft Start Time</h3>
+        <input type="datetime-local" className={`${inputCls} max-w-xs`} value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} />
+      </div>
+
+      <div>
+        <h3 className="mb-2 text-sm font-semibold uppercase tracking-widest text-teal">Draft Order (Round 1)</h3>
+        <p className="mb-2 text-xs text-mute">Set automatically if you used the Squid Race — reorder with the arrows if needed.</p>
+        <div className="space-y-1">
+          {order.map((id, i) => (
+            <div key={id} className="flex items-center justify-between rounded-md border border-line px-3 py-2 text-sm">
+              <span className="text-bone">{i + 1}. {owners.find((o) => o.id === id)?.name}</span>
+              <span className="flex gap-2">
+                <button onClick={() => move(i, -1)} className="text-teal">↑</button>
+                <button onClick={() => move(i, 1)} className="text-teal">↓</button>
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <h3 className="mb-2 text-sm font-semibold uppercase tracking-widest text-teal">Add to Player Pool</h3>
+        <p className="mb-2 text-xs text-mute">One per line: <code>Name, Position, Team</code>. Appended after any existing pool, ranked in the order pasted.</p>
+        <textarea className={inputCls} rows={4} value={poolText} onChange={(e) => setPoolText(e.target.value)} placeholder={"Ja'Marr Chase, WR, CIN"} />
+      </div>
+
+      <button disabled={busy} onClick={save} className="rounded-md bg-teal px-4 py-2 text-xs font-bold uppercase tracking-wide text-ink disabled:opacity-50">
+        {busy ? "Saving..." : "Save Setup"}
       </button>
     </div>
   );
@@ -756,8 +868,9 @@ function DraftControl({
     return (
       <div className="space-y-4">
         <SectionMsg msg={msg} />
+        <SetupFields draft={draft} owners={owners} season={season} onChange={onChange} setMsg={setMsg} />
         <p className="text-sm text-mute">
-          Order set. Add keepers below if any, then start the draft when everyone&apos;s ready.
+          Adjust anything above, then add keepers below if any, then start the draft when everyone&apos;s ready.
         </p>
         <KeeperEntry draft={draft} owners={owners} pool={pool} picks={picks} onChange={load} />
         <div className="flex gap-3">
@@ -929,6 +1042,7 @@ function MakePickForm({
   const bestAvailable = available
     .filter((p) => posFilter === "ALL" || p.position === posFilter)
     .filter((p) => !name || p.name.toLowerCase().includes(name.toLowerCase()))
+    .sort((a, b) => (a.rank ?? 9999) - (b.rank ?? 9999))
     .slice(0, 30);
 
   function pick(p: DraftPlayer) {
@@ -1002,7 +1116,7 @@ function MakePickForm({
                   onClick={() => pick(p)}
                   className="flex items-center justify-between rounded border border-line px-2 py-1.5 text-left text-xs text-mute hover:border-teal hover:text-teal"
                 >
-                  <span className="text-bone">{p.name}</span>
+                  <span className="text-bone">{p.rank ? `${p.rank}. ` : ""}{p.name}</span>
                   <span>{[p.position, p.nfl_team].filter(Boolean).join(" · ")}</span>
                 </button>
               ))}

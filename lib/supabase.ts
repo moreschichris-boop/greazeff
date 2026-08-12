@@ -130,6 +130,7 @@ export type Draft = {
   draft_order: string[]; // owner ids, round-1 order
   status: "setup" | "in_progress" | "complete";
   current_pick: number;
+  scheduled_at: string | null;
 };
 
 export type DraftPlayer = {
@@ -138,6 +139,8 @@ export type DraftPlayer = {
   name: string;
   position: string | null;
   nfl_team: string | null;
+  rank: number | null;
+  adp: number | null;
   drafted: boolean;
 };
 

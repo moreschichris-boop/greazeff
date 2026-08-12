@@ -133,7 +133,8 @@ export default function DraftBoardPage() {
   const positions = ["ALL", ...Array.from(new Set(available.map((p) => p.position).filter(Boolean) as string[])).sort()];
   const bestAvailable = available
     .filter((p) => posFilter === "ALL" || p.position === posFilter)
-    .filter((p) => !search || p.name.toLowerCase().includes(search.toLowerCase()));
+    .filter((p) => !search || p.name.toLowerCase().includes(search.toLowerCase()))
+    .sort((a, b) => (a.rank ?? 9999) - (b.rank ?? 9999));
 
   const totalPickCount = draft ? totalPicks(draft.draft_order, draft.rounds) : 0;
 
@@ -201,9 +202,7 @@ export default function DraftBoardPage() {
       {draft && (
         <>
           {draft.status === "setup" && (
-            <p className="mb-6 rounded-lg border border-line bg-panel/60 p-4 text-sm text-mute">
-              This draft hasn&apos;t started yet.
-            </p>
+            <DraftCountdown scheduledAt={draft.scheduled_at} />
           )}
 
           {draft.status === "in_progress" && onClock && (
@@ -323,7 +322,7 @@ export default function DraftBoardPage() {
               <div className="grid max-h-72 gap-1 overflow-y-auto sm:grid-cols-3">
                 {bestAvailable.map((p) => (
                   <div key={p.id} className="flex items-center justify-between rounded border border-line px-2 py-1.5 text-xs">
-                    <span className="text-bone">{p.name}</span>
+                    <span className="text-bone">{p.rank ? `${p.rank}. ` : ""}{p.name}</span>
                     <span className="text-mute">{[p.position, p.nfl_team].filter(Boolean).join(" · ")}</span>
                   </div>
                 ))}
@@ -402,6 +401,54 @@ export default function DraftBoardPage() {
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+function DraftCountdown({ scheduledAt }: { scheduledAt: string | null }) {
+  const [now, setNow] = useState(Date.now());
+
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  if (!scheduledAt) {
+    return (
+      <p className="mb-6 rounded-lg border border-line bg-panel/60 p-4 text-sm text-mute">
+        This draft hasn&apos;t started yet.
+      </p>
+    );
+  }
+
+  const target = new Date(scheduledAt).getTime();
+  const diff = target - now;
+
+  if (diff <= 0) {
+    return (
+      <div className="stat-card mb-6 rounded-xl border-teal/60 p-5 text-center">
+        <div className="font-display text-2xl text-teal">Draft time! Waiting for the commissioner to start it.</div>
+      </div>
+    );
+  }
+
+  const days = Math.floor(diff / 86400000);
+  const hours = Math.floor((diff % 86400000) / 3600000);
+  const minutes = Math.floor((diff % 3600000) / 60000);
+  const seconds = Math.floor((diff % 60000) / 1000);
+
+  return (
+    <div className="stat-card mb-6 rounded-xl border-teal/60 p-5 text-center">
+      <div className="text-xs font-semibold uppercase tracking-widest text-mute">Draft Starts In</div>
+      <div className="mt-2 flex justify-center gap-4 font-display text-3xl text-teal">
+        {days > 0 && <span>{days}d</span>}
+        <span>{String(hours).padStart(2, "0")}h</span>
+        <span>{String(minutes).padStart(2, "0")}m</span>
+        <span>{String(seconds).padStart(2, "0")}s</span>
+      </div>
+      <div className="mt-2 text-xs text-mute">
+        {new Date(scheduledAt).toLocaleString(undefined, { weekday: "long", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+      </div>
     </div>
   );
 }

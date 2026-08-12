@@ -4,6 +4,10 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase, Owner, Draft, DraftPick, Season, DraftPlayer } from "@/lib/supabase";
 import { teamOrderForRound, ownerForPick, totalPicks } from "@/lib/draft";
 import { sha256, markAdminSession, hasAdminSession } from "@/lib/auth";
+import { teamLogoUrl } from "@/lib/teamLogo";
+
+const ROSTER_SLOTS = ["QB", "RB", "RB", "WR", "WR", "TE", "FLEX", "FLEX", "K", "DEF"];
+const FLEX_POSITIONS = ["RB", "WR", "TE"];
 
 export default function DraftPage() {
   const [owners, setOwners] = useState<Owner[]>([]);
@@ -51,6 +55,37 @@ function TabButton({ active, onClick, children }: { active: boolean; onClick: ()
       {children}
     </button>
   );
+}
+
+function TeamLogo({ team, size = 16 }: { team: string | null | undefined; size?: number }) {
+  const url = teamLogoUrl(team);
+  if (!url) return null;
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src={url} alt={team ?? ""} width={size} height={size} className="inline-block shrink-0" style={{ width: size, height: size }} />;
+}
+
+function buildRoster(myPicks: DraftPick[]) {
+  const pool = [...myPicks];
+  const slots: { label: string; pick: DraftPick | null }[] = [];
+
+  for (const slotLabel of ROSTER_SLOTS) {
+    let idx = -1;
+    if (slotLabel === "FLEX") {
+      idx = pool.findIndex((p) => p.position && FLEX_POSITIONS.includes(p.position));
+    } else {
+      idx = pool.findIndex((p) => p.position === slotLabel);
+    }
+    if (idx >= 0) {
+      slots.push({ label: slotLabel, pick: pool[idx] });
+      pool.splice(idx, 1);
+    } else {
+      slots.push({ label: slotLabel, pick: null });
+    }
+  }
+  // whatever's left goes to bench
+  for (const p of pool) slots.push({ label: "BN", pick: p });
+
+  return slots;
 }
 
 /* ================= LIVE DRAFT ================= */
@@ -209,47 +244,56 @@ function LiveDraftTab({ owners, season }: { owners: Owner[]; season: Season }) {
             <div className="text-sm text-mute">Pick {draft.current_pick} of {totalPicks(draft.draft_order, draft.rounds)}</div>
           </div>
 
-          <div className="stat-card mb-8 rounded-xl p-5">
-            <h2 className="mb-3 font-display text-lg text-teal">Make Your Pick</h2>
-            <select
-              className="mb-3 w-full max-w-xs rounded-md border border-line bg-panel px-3 py-2 text-sm text-bone"
-              value={whoAmI}
-              onChange={(e) => setWhoAmI(e.target.value)}
-            >
-              <option value="">Who are you?</option>
-              {owners.map((o) => (<option key={o.id} value={o.id}>{o.name}</option>))}
-            </select>
+          <div className="mb-8 grid gap-6 lg:grid-cols-[1fr_300px]">
+            <div className="stat-card rounded-xl p-5">
+              <h2 className="mb-3 font-display text-lg text-teal">Make Your Pick</h2>
+              <select
+                className="mb-3 w-full max-w-xs rounded-md border border-line bg-panel px-3 py-2 text-sm text-bone"
+                value={whoAmI}
+                onChange={(e) => setWhoAmI(e.target.value)}
+              >
+                <option value="">Who are you?</option>
+                {owners.map((o) => (<option key={o.id} value={o.id}>{o.name}</option>))}
+              </select>
 
-            {whoAmI && whoAmI !== onClock.ownerId && (
-              <p className="text-sm text-mute">
-                Not your turn — waiting on <span className="text-teal">{ownerMap.get(onClock.ownerId)?.name}</span>.
-              </p>
-            )}
+              {whoAmI && whoAmI !== onClock.ownerId && (
+                <p className="text-sm text-mute">
+                  Not your turn — waiting on <span className="text-teal">{ownerMap.get(onClock.ownerId)?.name}</span>.
+                </p>
+              )}
 
-            {whoAmI && whoAmI === onClock.ownerId && (
-              <>
-                {pickMsg && <p className="mb-2 text-sm text-ember">{pickMsg}</p>}
-                <div className="grid gap-2 sm:grid-cols-4">
-                  <input className="rounded-md border border-line bg-panel px-3 py-2 text-sm text-bone sm:col-span-2" placeholder="Player name" value={pickName} onChange={(e) => setPickName(e.target.value)} />
-                  <input className="rounded-md border border-line bg-panel px-3 py-2 text-sm text-bone" placeholder="Position" value={pickPos} onChange={(e) => setPickPos(e.target.value)} />
-                  <input className="rounded-md border border-line bg-panel px-3 py-2 text-sm text-bone" placeholder="NFL team" value={pickTeam} onChange={(e) => setPickTeam(e.target.value)} />
-                </div>
-                {pool.length > 0 && (
-                  <div className="mt-2 max-h-40 overflow-y-auto">
-                    <div className="grid gap-1 sm:grid-cols-3">
-                      {bestAvailable.slice(0, 30).map((p) => (
-                        <button key={p.id} onClick={() => quickFill(p)} className="flex items-center justify-between rounded border border-line px-2 py-1 text-left text-xs text-mute hover:border-teal hover:text-teal">
-                          <span className="text-bone">{p.rank ? `${p.rank}. ` : ""}{p.name}</span>
-                          <span>{p.position}</span>
-                        </button>
-                      ))}
-                    </div>
+              {whoAmI && whoAmI === onClock.ownerId && (
+                <>
+                  {pickMsg && <p className="mb-2 text-sm text-ember">{pickMsg}</p>}
+                  <div className="grid gap-2 sm:grid-cols-4">
+                    <input className="rounded-md border border-line bg-panel px-3 py-2 text-sm text-bone sm:col-span-2" placeholder="Player name" value={pickName} onChange={(e) => setPickName(e.target.value)} />
+                    <input className="rounded-md border border-line bg-panel px-3 py-2 text-sm text-bone" placeholder="Position" value={pickPos} onChange={(e) => setPickPos(e.target.value)} />
+                    <input className="rounded-md border border-line bg-panel px-3 py-2 text-sm text-bone" placeholder="NFL team" value={pickTeam} onChange={(e) => setPickTeam(e.target.value)} />
                   </div>
-                )}
-                <button disabled={submitting} onClick={submitPick} className="mt-3 rounded-md bg-teal px-4 py-2 text-xs font-bold uppercase tracking-wide text-ink disabled:opacity-50">
-                  {submitting ? "Saving..." : "Submit Pick"}
-                </button>
-              </>
+                  {pool.length > 0 && (
+                    <div className="mt-2 max-h-40 overflow-y-auto">
+                      <div className="grid gap-1 sm:grid-cols-3">
+                        {bestAvailable.slice(0, 30).map((p) => (
+                          <button key={p.id} onClick={() => quickFill(p)} className="flex items-center justify-between rounded border border-line px-2 py-1 text-left text-xs text-mute hover:border-teal hover:text-teal">
+                            <span className="flex items-center gap-1.5 text-bone">
+                              <TeamLogo team={p.nfl_team} size={14} />
+                              {p.rank ? `${p.rank}. ` : ""}{p.name}
+                            </span>
+                            <span>{p.position}{p.bye_week ? ` · Bye ${p.bye_week}` : ""}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <button disabled={submitting} onClick={submitPick} className="mt-3 rounded-md bg-teal px-4 py-2 text-xs font-bold uppercase tracking-wide text-ink disabled:opacity-50">
+                    {submitting ? "Saving..." : "Submit Pick"}
+                  </button>
+                </>
+              )}
+            </div>
+
+            {whoAmI && (
+              <YourTeamPanel picks={picks} owners={owners} whoAmI={whoAmI} rounds={draft.rounds} />
             )}
           </div>
 
@@ -258,9 +302,12 @@ function LiveDraftTab({ owners, season }: { owners: Owner[]; season: Season }) {
       )}
 
       {draft && draft.status === "complete" && (
-        <div className="stat-card mb-8 rounded-xl p-5 text-center">
-          <div className="font-display text-2xl text-gold">Draft Complete</div>
-        </div>
+        <>
+          <div className="stat-card mb-8 rounded-xl p-5 text-center">
+            <div className="font-display text-2xl text-gold">Draft Complete</div>
+          </div>
+          <CommissionerComplete draft={draft} onChange={loadDraft} />
+        </>
       )}
 
       {draft && pool.length > 0 && draft.status !== "setup" && (
@@ -280,8 +327,11 @@ function LiveDraftTab({ owners, season }: { owners: Owner[]; season: Season }) {
           <div className="grid max-h-72 gap-1 overflow-y-auto sm:grid-cols-3">
             {bestAvailable.map((p) => (
               <div key={p.id} className="flex items-center justify-between rounded border border-line px-2 py-1.5 text-xs">
-                <span className="text-bone">{p.rank ? `${p.rank}. ` : ""}{p.name}</span>
-                <span className="text-mute">{[p.position, p.nfl_team].filter(Boolean).join(" · ")}</span>
+                <span className="flex items-center gap-1.5 text-bone">
+                  <TeamLogo team={p.nfl_team} size={14} />
+                  {p.rank ? `${p.rank}. ` : ""}{p.name}
+                </span>
+                <span className="text-mute">{[p.position, p.nfl_team, p.bye_week ? `Bye ${p.bye_week}` : null].filter(Boolean).join(" · ")}</span>
               </div>
             ))}
             {bestAvailable.length === 0 && <p className="text-xs text-mute">No matching players.</p>}
@@ -299,7 +349,10 @@ function LiveDraftTab({ owners, season }: { owners: Owner[]; season: Season }) {
               <div key={p.id} className="stat-card flex items-center justify-between rounded-lg px-4 py-2 text-sm">
                 <span className="text-mute">Pick {p.pick_number} (Rd {p.round})</span>
                 <span className="text-bone">{ownerMap.get(p.owner_id)?.name}</span>
-                <span className="font-semibold text-teal">{p.player_name}{p.position ? ` (${p.position})` : ""}</span>
+                <span className="flex items-center gap-1.5 font-semibold text-teal">
+                  <TeamLogo team={p.nfl_team} size={14} />
+                  {p.player_name}{p.position ? ` (${p.position})` : ""}
+                </span>
               </div>
             ))}
             {picks.length === 0 && <p className="text-mute">No picks yet.</p>}
@@ -337,7 +390,10 @@ function DraftBoard({ draft, owners, ownerMap, pickMap }: { draft: Draft; owners
                     <td key={colOwnerId} className={`px-2 py-2 align-top ${isOnClock ? "bg-teal/10" : ""}`}>
                       {pick ? (
                         <div>
-                          <div className="font-semibold text-bone">{pick.player_name}</div>
+                          <div className="flex items-center gap-1.5 font-semibold text-bone">
+                            <TeamLogo team={pick.nfl_team} size={14} />
+                            {pick.player_name}
+                          </div>
                           <div className="text-mute">{[pick.position, pick.nfl_team].filter(Boolean).join(" · ")}{pick.is_keeper ? " · Keeper" : ""}</div>
                         </div>
                       ) : isOnClock ? (
@@ -391,6 +447,35 @@ function DraftCountdown({ scheduledAt }: { scheduledAt: string | null }) {
       </div>
       <div className="mt-2 text-xs text-mute">
         {new Date(scheduledAt).toLocaleString(undefined, { weekday: "long", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+      </div>
+    </div>
+  );
+}
+
+function YourTeamPanel({ picks, owners, whoAmI, rounds }: { picks: DraftPick[]; owners: Owner[]; whoAmI: string; rounds: number }) {
+  const myPicks = picks.filter((p) => p.owner_id === whoAmI).sort((a, b) => a.pick_number - b.pick_number);
+  const slots = buildRoster(myPicks);
+  const owner = owners.find((o) => o.id === whoAmI);
+
+  return (
+    <div className="stat-card h-fit rounded-xl p-4">
+      <h3 className="mb-3 font-display text-sm uppercase tracking-widest text-teal">
+        {owner?.name ?? "Your"} Team ({myPicks.length}/{rounds})
+      </h3>
+      <div className="space-y-1">
+        {slots.map((s, i) => (
+          <div key={i} className="flex items-center justify-between rounded border border-line/60 px-2 py-1.5 text-xs">
+            <span className="w-12 shrink-0 font-semibold text-mute">{s.label}</span>
+            {s.pick ? (
+              <span className="flex flex-1 items-center justify-end gap-1.5 truncate text-right text-bone">
+                {s.pick.player_name}
+                <TeamLogo team={s.pick.nfl_team} size={14} />
+              </span>
+            ) : (
+              <span className="flex-1 text-right text-mute/50">empty</span>
+            )}
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -658,16 +743,45 @@ function CommissionerInProgress({ draft, owners, season, picks, onChange }: { dr
     setMsg(""); onChange();
   }
 
+  async function deleteDraft() {
+    if (!confirm("Delete this draft entirely? All picks will be lost.")) return;
+    await supabase.from("drafts").delete().eq("id", draft.id);
+    onChange();
+  }
+
   return (
     <div className="mb-8">
       {gate}
       {unlocked && (
-        <div className="stat-card flex items-center justify-between rounded-xl p-4">
+        <div className="stat-card flex flex-wrap items-center justify-between gap-3 rounded-xl p-4">
           <span className="text-xs font-semibold uppercase tracking-widest text-mute">Commissioner Controls</span>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             {msg && <span className="text-xs text-ember">{msg}</span>}
             <button onClick={undoLast} className="rounded-md border border-line px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-ember hover:border-ember">Undo Last Pick</button>
+            <button onClick={deleteDraft} className="rounded-md border border-line px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-ember hover:border-ember">Delete Draft</button>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CommissionerComplete({ draft, onChange }: { draft: Draft; onChange: () => void }) {
+  const { unlocked, gate } = useCommissionerUnlock();
+
+  async function deleteDraft() {
+    if (!confirm("Delete this draft entirely? All picks will be lost.")) return;
+    await supabase.from("drafts").delete().eq("id", draft.id);
+    onChange();
+  }
+
+  return (
+    <div className="mb-8">
+      {gate}
+      {unlocked && (
+        <div className="stat-card flex flex-wrap items-center justify-between gap-3 rounded-xl p-4">
+          <span className="text-xs font-semibold uppercase tracking-widest text-mute">Commissioner Controls</span>
+          <button onClick={deleteDraft} className="rounded-md border border-line px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-ember hover:border-ember">Delete Draft</button>
         </div>
       )}
     </div>

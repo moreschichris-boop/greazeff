@@ -141,6 +141,7 @@ export type DraftPlayer = {
   nfl_team: string | null;
   rank: number | null;
   adp: number | null;
+  bye_week: number | null;
   drafted: boolean;
 };
 

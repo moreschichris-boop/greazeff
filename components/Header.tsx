@@ -7,6 +7,7 @@ import SquidMark from "./SquidMark";
 const links = [
   { href: "/", label: "Home" },
   { href: "/draft", label: "Draft" },
+  { href: "/squid-race", label: "Squid Race" },
   { href: "/finances", label: "Finances" },
   { href: "/parlay", label: "Parlay" },
   { href: "/rosters", label: "Rosters" },

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { supabase, Owner } from "@/lib/supabase";
+import { supabase, Owner, Season } from "@/lib/supabase";
 
 type RaceState = "idle" | "countdown" | "racing" | "finished";
 
@@ -9,19 +9,47 @@ const LANE_COLORS = ["#f472b6", "#38bdf8", "#facc15", "#a78bfa", "#4ade80", "#fb
 
 export default function SquidRacePage() {
   const [owners, setOwners] = useState<Owner[]>([]);
+  const [seasons, setSeasons] = useState<Season[]>([]);
+  const [seasonId, setSeasonId] = useState("");
   const [loading, setLoading] = useState(true);
   const [raceState, setRaceState] = useState<RaceState>("idle");
   const [countdown, setCountdown] = useState(3);
   const [durations, setDurations] = useState<Record<string, number>>({});
   const [finishOrder, setFinishOrder] = useState<string[]>([]);
+  const [saveMsg, setSaveMsg] = useState("");
+  const [saving, setSaving] = useState(false);
   const finishedRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
-    supabase.from("owners").select("*").order("sort_order", { ascending: true }).then(({ data }) => {
-      setOwners(data ?? []);
+    (async () => {
+      const { data: o } = await supabase.from("owners").select("*").order("sort_order", { ascending: true });
+      const { data: s } = await supabase.from("seasons").select("*").order("year", { ascending: false });
+      setOwners(o ?? []);
+      setSeasons(s ?? []);
+      if (s && s.length) setSeasonId(s[0].id);
       setLoading(false);
-    });
+    })();
   }, []);
+
+  async function useAsDraftOrder() {
+    if (!seasonId) return;
+    setSaving(true);
+    setSaveMsg("");
+    const { data: existing } = await supabase.from("drafts").select("*").eq("season_id", seasonId).maybeSingle();
+    if (existing) {
+      const { error } = await supabase.from("drafts").update({ draft_order: finishOrder }).eq("id", existing.id);
+      setSaveMsg(error ? `Error: ${error.message}` : "Draft order updated for this season.");
+    } else {
+      const { error } = await supabase.from("drafts").insert({
+        season_id: seasonId,
+        draft_order: finishOrder,
+        rounds: 17,
+        status: "setup",
+      });
+      setSaveMsg(error ? `Error: ${error.message}` : "Draft created with this order — finish setup in Admin (rounds, player pool, start time).");
+    }
+    setSaving(false);
+  }
 
   function startRace() {
     finishedRef.current = new Set();
@@ -64,6 +92,13 @@ export default function SquidRacePage() {
       <div className="divider-tentacle my-6" />
 
       <div className="mb-6 flex flex-wrap items-center gap-3">
+        <select
+          className="rounded-md border border-line bg-panel px-3 py-2 text-sm text-bone"
+          value={seasonId}
+          onChange={(e) => setSeasonId(e.target.value)}
+        >
+          {seasons.map((s) => (<option key={s.id} value={s.id}>{s.year}</option>))}
+        </select>
         <button
           onClick={startRace}
           disabled={raceState === "countdown" || raceState === "racing"}
@@ -113,7 +148,7 @@ export default function SquidRacePage() {
       {raceState === "finished" && (
         <div className="mt-10">
           <h2 className="font-display text-2xl tracking-wide text-bone">Draft Order</h2>
-          <p className="mt-1 text-sm text-mute">1st place picks first. Use this order when you set up the draft in Admin.</p>
+          <p className="mt-1 text-sm text-mute">1st place picks first.</p>
           <div className="divider-tentacle my-4" />
           <ol className="space-y-2">
             {finishOrder.map((id, i) => (
@@ -123,6 +158,14 @@ export default function SquidRacePage() {
               </li>
             ))}
           </ol>
+          {saveMsg && <p className="mt-4 text-sm text-teal">{saveMsg}</p>}
+          <button
+            disabled={saving}
+            onClick={useAsDraftOrder}
+            className="mt-4 rounded-md bg-teal px-5 py-2.5 text-sm font-bold uppercase tracking-wide text-ink disabled:opacity-50"
+          >
+            {saving ? "Saving..." : `Use as ${seasons.find((s) => s.id === seasonId)?.year ?? ""} Draft Order`}
+          </button>
         </div>
       )}
     </div>

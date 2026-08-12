@@ -15,6 +15,13 @@ export default function DraftBoardPage() {
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
 
+  const [whoAmI, setWhoAmI] = useState("");
+  const [pickName, setPickName] = useState("");
+  const [pickPos, setPickPos] = useState("");
+  const [pickTeam, setPickTeam] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [pickMsg, setPickMsg] = useState("");
+
   useEffect(() => {
     (async () => {
       const { data: o } = await supabase.from("owners").select("*").order("sort_order", { ascending: true });
@@ -128,6 +135,49 @@ export default function DraftBoardPage() {
     .filter((p) => posFilter === "ALL" || p.position === posFilter)
     .filter((p) => !search || p.name.toLowerCase().includes(search.toLowerCase()));
 
+  const totalPickCount = draft ? totalPicks(draft.draft_order, draft.rounds) : 0;
+
+  function quickFill(p: DraftPlayer) {
+    setPickName(p.name);
+    setPickPos(p.position ?? "");
+    setPickTeam(p.nfl_team ?? "");
+  }
+
+  async function submitPick() {
+    if (!draft || !onClock) return;
+    if (whoAmI !== onClock.ownerId) return setPickMsg("It's not your turn yet.");
+    if (!pickName.trim()) return setPickMsg("Enter a player name.");
+    setSubmitting(true);
+    setPickMsg("");
+
+    const matched = pool.find((p) => p.name.toLowerCase() === pickName.trim().toLowerCase());
+    const { error } = await supabase.from("draft_picks").insert({
+      draft_id: draft.id,
+      pick_number: draft.current_pick,
+      round: onClock.round,
+      pick_in_round: onClock.pickInRound,
+      owner_id: onClock.ownerId,
+      player_name: pickName.trim(),
+      position: pickPos || null,
+      nfl_team: pickTeam || null,
+      is_keeper: false,
+    });
+    if (error) {
+      setSubmitting(false);
+      return setPickMsg(`Error: ${error.message}`);
+    }
+    if (matched) await supabase.from("draft_players").update({ drafted: true }).eq("id", matched.id);
+
+    const nextPick = draft.current_pick + 1;
+    const newStatus = nextPick > totalPickCount ? "complete" : "in_progress";
+    await supabase.from("drafts").update({ current_pick: nextPick, status: newStatus }).eq("id", draft.id);
+
+    setPickName("");
+    setPickPos("");
+    setPickTeam("");
+    setSubmitting(false);
+  }
+
   if (loading) return <p className="text-mute">Loading...</p>;
 
   return (
@@ -167,6 +217,75 @@ export default function DraftBoardPage() {
               <div className="text-sm text-mute">
                 Pick {draft.current_pick} of {totalPicks(draft.draft_order, draft.rounds)}
               </div>
+            </div>
+          )}
+
+          {draft.status === "in_progress" && onClock && (
+            <div className="stat-card mb-8 rounded-xl p-5">
+              <h2 className="mb-3 font-display text-lg text-teal">Make Your Pick</h2>
+              <select
+                className="mb-3 w-full max-w-xs rounded-md border border-line bg-panel px-3 py-2 text-sm text-bone"
+                value={whoAmI}
+                onChange={(e) => setWhoAmI(e.target.value)}
+              >
+                <option value="">Who are you?</option>
+                {owners.map((o) => (<option key={o.id} value={o.id}>{o.name}</option>))}
+              </select>
+
+              {whoAmI && whoAmI !== onClock.ownerId && (
+                <p className="text-sm text-mute">
+                  Not your turn — waiting on <span className="text-teal">{ownerMap.get(onClock.ownerId)?.name}</span>.
+                </p>
+              )}
+
+              {whoAmI && whoAmI === onClock.ownerId && (
+                <>
+                  {pickMsg && <p className="mb-2 text-sm text-ember">{pickMsg}</p>}
+                  <div className="grid gap-2 sm:grid-cols-4">
+                    <input
+                      className="rounded-md border border-line bg-panel px-3 py-2 text-sm text-bone sm:col-span-2"
+                      placeholder="Player name"
+                      value={pickName}
+                      onChange={(e) => setPickName(e.target.value)}
+                    />
+                    <input
+                      className="rounded-md border border-line bg-panel px-3 py-2 text-sm text-bone"
+                      placeholder="Position"
+                      value={pickPos}
+                      onChange={(e) => setPickPos(e.target.value)}
+                    />
+                    <input
+                      className="rounded-md border border-line bg-panel px-3 py-2 text-sm text-bone"
+                      placeholder="NFL team"
+                      value={pickTeam}
+                      onChange={(e) => setPickTeam(e.target.value)}
+                    />
+                  </div>
+                  {pool.length > 0 && (
+                    <div className="mt-2 max-h-40 overflow-y-auto">
+                      <div className="grid gap-1 sm:grid-cols-3">
+                        {bestAvailable.slice(0, 30).map((p) => (
+                          <button
+                            key={p.id}
+                            onClick={() => quickFill(p)}
+                            className="flex items-center justify-between rounded border border-line px-2 py-1 text-left text-xs text-mute hover:border-teal hover:text-teal"
+                          >
+                            <span className="text-bone">{p.name}</span>
+                            <span>{p.position}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <button
+                    disabled={submitting}
+                    onClick={submitPick}
+                    className="mt-3 rounded-md bg-teal px-4 py-2 text-xs font-bold uppercase tracking-wide text-ink disabled:opacity-50"
+                  >
+                    {submitting ? "Saving..." : "Submit Pick"}
+                  </button>
+                </>
+              )}
             </div>
           )}
 

@@ -40,3 +40,48 @@ body {
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: #0b1220; }
 ::-webkit-scrollbar-thumb { background: #233350; border-radius: 6px; }
+
+@keyframes squid-wiggle {
+  0% { transform: translateY(0) rotate(-3deg); }
+  50% { transform: translateY(-3px) rotate(3deg); }
+  100% { transform: translateY(0) rotate(-3deg); }
+}
+
+.squid-swim {
+  animation: squid-wiggle 0.35s ease-in-out infinite alternate;
+}
+
+@keyframes bubble-rise {
+  0% { transform: translateY(0) scale(0.5); opacity: 0.55; }
+  85% { opacity: 0.35; }
+  100% { transform: translateY(-160px) scale(1.2); opacity: 0; }
+}
+
+.ocean-bubble {
+  animation-name: bubble-rise;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+
+@keyframes ink-puff {
+  0% { transform: translate(-50%, -50%) scale(0.2); opacity: 0.6; }
+  100% { transform: translate(-50%, -50%) scale(3); opacity: 0; }
+}
+
+.ink-puff {
+  animation: ink-puff 750ms ease-out forwards;
+}
+
+@keyframes wave-drift {
+  0% { background-position: 0 0; }
+  100% { background-position: 200px 0; }
+}
+
+.ocean-track {
+  background-color: #051a2e;
+  background-image:
+    radial-gradient(circle at 15% 20%, rgba(45, 212, 191, 0.12) 0%, transparent 40%),
+    radial-gradient(circle at 85% 80%, rgba(56, 189, 248, 0.10) 0%, transparent 45%),
+    repeating-linear-gradient(100deg, rgba(255,255,255,0.02) 0px, rgba(255,255,255,0.02) 2px, transparent 2px, transparent 40px);
+  animation: wave-drift 6s linear infinite;
+}

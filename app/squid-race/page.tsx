@@ -4,8 +4,11 @@ import { useEffect, useRef, useState } from "react";
 import { supabase, Owner, Season } from "@/lib/supabase";
 
 type RaceState = "idle" | "countdown" | "racing" | "finished";
+type InkPuff = { key: number; laneIndex: number; left: number };
+
 const TRACK_LEN = 100;
 const LANE_COLORS = ["#f472b6", "#38bdf8", "#facc15", "#a78bfa", "#4ade80", "#fb923c", "#f87171", "#2dd4bf", "#c084fc", "#fbbf24", "#60a5fa", "#f97316"];
+const BUBBLE_COUNT = 14;
 
 export default function SquidRacePage() {
   const [owners, setOwners] = useState<Owner[]>([]);
@@ -16,12 +19,14 @@ export default function SquidRacePage() {
   const [countdown, setCountdown] = useState(3);
   const [positions, setPositions] = useState<Record<string, number>>({});
   const [finishOrder, setFinishOrder] = useState<string[]>([]);
+  const [inkPuffs, setInkPuffs] = useState<InkPuff[]>([]);
   const [saveMsg, setSaveMsg] = useState("");
   const [saving, setSaving] = useState(false);
 
   const speedsRef = useRef<Record<string, number>>({});
   const finishedRef = useRef<Set<string>>(new Set());
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const inkCounterRef = useRef(0);
 
   useEffect(() => {
     (async () => {
@@ -38,11 +43,13 @@ export default function SquidRacePage() {
   function startRace() {
     finishedRef.current = new Set();
     setFinishOrder([]);
+    setInkPuffs([]);
     const initial: Record<string, number> = {};
     const speeds: Record<string, number> = {};
     for (const o of owners) {
       initial[o.id] = 0;
-      speeds[o.id] = 0.55 + Math.random() * 0.35; // base pace per tick
+      // Slower base pace than before — a longer, more suspenseful race.
+      speeds[o.id] = 0.24 + Math.random() * 0.14;
     }
     setPositions(initial);
     speedsRef.current = speeds;
@@ -60,9 +67,9 @@ export default function SquidRacePage() {
     return () => clearTimeout(t);
   }, [raceState, countdown]);
 
-  // Tick-driven race loop — randomized per-tick bursts plus a mild
-  // rubber-band pulling stragglers toward the leader, so it stays close
-  // and unpredictable right up to the line instead of a locked-in outcome.
+  // Tick-driven race loop — randomized per-tick variance, a mild
+  // rubber-band pulling stragglers toward the leader for a close finish,
+  // and the occasional ink-squirt burst for both drama and a speed kick.
   useEffect(() => {
     if (raceState !== "racing") return;
 
@@ -71,16 +78,28 @@ export default function SquidRacePage() {
         const next = { ...prev };
         const leaderPos = Math.max(...owners.map((o) => prev[o.id] ?? 0));
         const order: string[] = [];
+        const newPuffs: InkPuff[] = [];
 
-        for (const o of owners) {
-          if (finishedRef.current.has(o.id)) continue;
+        owners.forEach((o, i) => {
+          if (finishedRef.current.has(o.id)) return;
           const pos = prev[o.id] ?? 0;
-          const jitter = (Math.random() - 0.45) * 1.1;
-          const rubberBand = Math.max(0, (leaderPos - pos) * 0.035);
-          const newPos = Math.min(TRACK_LEN, pos + speedsRef.current[o.id] + jitter + rubberBand);
+          const jitter = (Math.random() - 0.42) * 0.55;
+          const rubberBand = Math.max(0, (leaderPos - pos) * 0.02);
+
+          let inkBoost = 0;
+          if (Math.random() < 0.025) {
+            inkBoost = 1.6;
+            const key = inkCounterRef.current++;
+            newPuffs.push({ key, laneIndex: i, left: (pos / TRACK_LEN) * 88 + 4 });
+            setTimeout(() => setInkPuffs((p) => p.filter((ip) => ip.key !== key)), 750);
+          }
+
+          const newPos = Math.min(TRACK_LEN, pos + speedsRef.current[o.id] + jitter + rubberBand + inkBoost);
           next[o.id] = newPos;
           if (newPos >= TRACK_LEN) order.push(o.id);
-        }
+        });
+
+        if (newPuffs.length) setInkPuffs((p) => [...p, ...newPuffs]);
 
         if (order.length) {
           order.sort((a, b) => (next[b] ?? 0) - (next[a] ?? 0));
@@ -128,7 +147,7 @@ export default function SquidRacePage() {
   return (
     <div>
       <h1 className="font-display text-4xl tracking-wide text-bone">Squid Race</h1>
-      <p className="mt-2 text-mute">Twelve squids, one finish line — winner picks first.</p>
+      <p className="mt-2 text-mute">Twelve squids, one finish line, ink flying — winner picks first.</p>
       <div className="divider-tentacle my-6" />
 
       <div className="mb-6 flex flex-wrap items-center gap-3">
@@ -157,24 +176,49 @@ export default function SquidRacePage() {
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[1fr_260px]">
-        <div className="stat-card overflow-hidden rounded-xl p-4">
+        <div className="ocean-track relative overflow-hidden rounded-xl border border-teal/20 p-4">
+          {/* decorative rising bubbles */}
+          {Array.from({ length: BUBBLE_COUNT }).map((_, i) => (
+            <div
+              key={i}
+              className="ocean-bubble pointer-events-none absolute rounded-full bg-teal/20"
+              style={{
+                left: `${(i * 137) % 100}%`,
+                bottom: `-${10 + (i % 5) * 15}px`,
+                width: 4 + (i % 4) * 3,
+                height: 4 + (i % 4) * 3,
+                animationDuration: `${3.5 + (i % 5)}s`,
+                animationDelay: `${(i % 7) * 0.6}s`,
+              }}
+            />
+          ))}
+
           {owners.map((o, i) => {
             const place = finishOrder.indexOf(o.id);
             const pos = positions[o.id] ?? 0;
             const isRacing = raceState === "racing" || raceState === "finished";
             return (
-              <div key={o.id} className="relative mb-2 h-11 overflow-hidden rounded-md bg-panel/60">
-                <div className="absolute inset-y-0 left-2 z-10 flex items-center text-xs font-semibold text-mute">
+              <div key={o.id} className="relative mb-2 h-11 overflow-hidden rounded-md bg-black/20">
+                <div className="absolute inset-y-0 left-2 z-10 flex items-center text-xs font-semibold text-bone/90 drop-shadow">
                   {o.name}
                 </div>
-                <div className="absolute right-2 top-1/2 h-4 w-0.5 -translate-y-1/2 bg-teal/40" />
+                <div className="absolute right-2 top-1/2 h-4 w-0.5 -translate-y-1/2 bg-teal/50" />
+
+                {inkPuffs.filter((p) => p.laneIndex === i).map((p) => (
+                  <div
+                    key={p.key}
+                    className="ink-puff pointer-events-none absolute top-1/2 h-6 w-6 rounded-full bg-[radial-gradient(circle,rgba(20,20,40,0.9)_0%,rgba(20,20,40,0)_70%)]"
+                    style={{ left: `${p.left}%` }}
+                  />
+                ))}
+
                 <div
                   className={`absolute top-1/2 -translate-y-1/2 text-2xl ${raceState === "racing" ? "squid-swim" : ""}`}
                   style={{
                     left: isRacing ? `calc(${(pos / TRACK_LEN) * 88}% + 4px)` : "6px",
                     transition: raceState === "racing" ? "left 90ms linear" : "none",
                     color: LANE_COLORS[i % LANE_COLORS.length],
-                    filter: place === 0 ? "drop-shadow(0 0 6px #eab308)" : undefined,
+                    filter: place === 0 ? "drop-shadow(0 0 6px #eab308)" : "drop-shadow(0 1px 2px rgba(0,0,0,0.5))",
                   }}
                 >
                   🦑

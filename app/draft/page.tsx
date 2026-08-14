@@ -82,7 +82,6 @@ function buildRoster(myPicks: DraftPick[]) {
       slots.push({ label: slotLabel, pick: null });
     }
   }
-  // whatever's left goes to bench
   for (const p of pool) slots.push({ label: "BN", pick: p });
 
   return slots;
@@ -99,6 +98,8 @@ function LiveDraftTab({ owners, season }: { owners: Owner[]; season: Season }) {
   const [loaded, setLoaded] = useState(false);
 
   const [whoAmI, setWhoAmI] = useState("");
+  const [pickMode, setPickMode] = useState<"pool" | "manual">("pool");
+  const [selectedPlayerId, setSelectedPlayerId] = useState("");
   const [pickName, setPickName] = useState("");
   const [pickPos, setPickPos] = useState("");
   const [pickTeam, setPickTeam] = useState("");
@@ -122,7 +123,6 @@ function LiveDraftTab({ owners, season }: { owners: Owner[]; season: Season }) {
     supabase.from("draft_players").select("*").eq("season_year", season.year).then(({ data }) => setPool(data ?? []));
   }, [season.year]);
 
-  // Realtime: pool + picks + draft status, live across every device.
   useEffect(() => {
     const poolChannel = supabase
       .channel(`draft-players-${season.year}`)
@@ -183,19 +183,27 @@ function LiveDraftTab({ owners, season }: { owners: Owner[]; season: Season }) {
   const totalPickCount = draft ? totalPicks(draft.draft_order, draft.rounds) : 0;
 
   function quickFill(p: DraftPlayer) {
+    setSelectedPlayerId(p.id);
     setPickName(p.name);
     setPickPos(p.position ?? "");
     setPickTeam(p.nfl_team ?? "");
   }
 
+  function resetPickForm() {
+    setSelectedPlayerId(""); setPickName(""); setPickPos(""); setPickTeam("");
+  }
+
   async function submitPick() {
     if (!draft || !onClock) return;
     if (whoAmI !== onClock.ownerId) return setPickMsg("It's not your turn yet.");
-    if (!pickName.trim()) return setPickMsg("Enter a player name.");
+    if (!pickName.trim()) return setPickMsg(pickMode === "pool" ? "Select a player from the list." : "Enter a player name.");
     setSubmitting(true);
     setPickMsg("");
 
-    const matched = pool.find((p) => p.name.toLowerCase() === pickName.trim().toLowerCase());
+    const matched = pickMode === "pool"
+      ? pool.find((p) => p.id === selectedPlayerId)
+      : pool.find((p) => p.name.toLowerCase() === pickName.trim().toLowerCase());
+
     const { error } = await supabase.from("draft_picks").insert({
       draft_id: draft.id,
       pick_number: draft.current_pick,
@@ -214,7 +222,8 @@ function LiveDraftTab({ owners, season }: { owners: Owner[]; season: Season }) {
     const newStatus = nextPick > totalPickCount ? "complete" : "in_progress";
     await supabase.from("drafts").update({ current_pick: nextPick, status: newStatus }).eq("id", draft.id);
 
-    setPickName(""); setPickPos(""); setPickTeam(""); setSubmitting(false);
+    resetPickForm();
+    setSubmitting(false);
   }
 
   if (!loaded) return <p className="text-mute">Loading...</p>;
@@ -265,26 +274,79 @@ function LiveDraftTab({ owners, season }: { owners: Owner[]; season: Season }) {
               {whoAmI && whoAmI === onClock.ownerId && (
                 <>
                   {pickMsg && <p className="mb-2 text-sm text-ember">{pickMsg}</p>}
-                  <div className="grid gap-2 sm:grid-cols-4">
-                    <input className="rounded-md border border-line bg-panel px-3 py-2 text-sm text-bone sm:col-span-2" placeholder="Player name" value={pickName} onChange={(e) => setPickName(e.target.value)} />
-                    <input className="rounded-md border border-line bg-panel px-3 py-2 text-sm text-bone" placeholder="Position" value={pickPos} onChange={(e) => setPickPos(e.target.value)} />
-                    <input className="rounded-md border border-line bg-panel px-3 py-2 text-sm text-bone" placeholder="NFL team" value={pickTeam} onChange={(e) => setPickTeam(e.target.value)} />
+
+                  <div className="mb-3 flex gap-2">
+                    <button
+                      onClick={() => { setPickMode("pool"); resetPickForm(); setPickMsg(""); }}
+                      className={`rounded px-3 py-1.5 text-xs font-bold uppercase tracking-wide ${pickMode === "pool" ? "bg-teal text-ink" : "border border-line text-mute hover:text-bone"}`}
+                    >
+                      Pick from pool
+                    </button>
+                    <button
+                      onClick={() => { setPickMode("manual"); resetPickForm(); setPickMsg(""); }}
+                      className={`rounded px-3 py-1.5 text-xs font-bold uppercase tracking-wide ${pickMode === "manual" ? "bg-teal text-ink" : "border border-line text-mute hover:text-bone"}`}
+                    >
+                      Player not in pool? Enter manually
+                    </button>
                   </div>
-                  {pool.length > 0 && (
-                    <div className="mt-2 max-h-40 overflow-y-auto">
-                      <div className="grid gap-1 sm:grid-cols-3">
-                        {bestAvailable.slice(0, 30).map((p) => (
-                          <button key={p.id} onClick={() => quickFill(p)} className="flex items-center justify-between rounded border border-line px-2 py-1 text-left text-xs text-mute hover:border-teal hover:text-teal">
-                            <span className="flex items-center gap-1.5 text-bone">
-                              <TeamLogo team={p.nfl_team} size={14} />
-                              {p.rank ? `${p.rank}. ` : ""}{p.name}
-                            </span>
-                            <span>{p.position}{p.bye_week ? ` · Bye ${p.bye_week}` : ""}</span>
-                          </button>
+
+                  {pickMode === "pool" && (
+                    <>
+                      <input
+                        className="mb-2 w-full max-w-sm rounded-md border border-line bg-panel px-3 py-2 text-sm text-bone"
+                        placeholder="Search players..."
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                      />
+                      <select
+                        className={`${inputCls} max-w-sm`}
+                        value={selectedPlayerId}
+                        onChange={(e) => {
+                          const p = pool.find((pl) => pl.id === e.target.value);
+                          if (p) quickFill(p);
+                        }}
+                      >
+                        <option value="">Select a player...</option>
+                        {bestAvailable.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.rank ? `${p.rank}. ` : ""}{p.name} ({p.position ?? "?"} · {p.nfl_team ?? "?"}{p.bye_week ? ` · Bye ${p.bye_week}` : ""})
+                          </option>
                         ))}
-                      </div>
-                    </div>
+                      </select>
+                      {pickName && (
+                        <p className="mt-2 text-sm text-bone">
+                          Selected: <span className="font-semibold text-teal">{pickName}</span> ({pickPos} · {pickTeam})
+                        </p>
+                      )}
+                      {pool.length > 0 && (
+                        <div className="mt-3 max-h-40 overflow-y-auto">
+                          <div className="grid gap-1 sm:grid-cols-3">
+                            {bestAvailable.slice(0, 30).map((p) => (
+                              <button key={p.id} onClick={() => quickFill(p)} className="flex items-center justify-between rounded border border-line px-2 py-1 text-left text-xs text-mute hover:border-teal hover:text-teal">
+                                <span className="flex items-center gap-1.5 text-bone">
+                                  <TeamLogo team={p.nfl_team} size={14} />
+                                  {p.rank ? `${p.rank}. ` : ""}{p.name}
+                                </span>
+                                <span>{p.position}{p.bye_week ? ` · Bye ${p.bye_week}` : ""}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </>
                   )}
+
+                  {pickMode === "manual" && (
+                    <>
+                      <p className="mb-2 text-xs text-mute">Use this only if the player really isn&apos;t in the pool above — this won&apos;t update Best Available.</p>
+                      <div className="grid gap-2 sm:grid-cols-4">
+                        <input className="rounded-md border border-line bg-panel px-3 py-2 text-sm text-bone sm:col-span-2" placeholder="Player name" value={pickName} onChange={(e) => { setPickName(e.target.value); setSelectedPlayerId(""); }} />
+                        <input className="rounded-md border border-line bg-panel px-3 py-2 text-sm text-bone" placeholder="Position" value={pickPos} onChange={(e) => setPickPos(e.target.value)} />
+                        <input className="rounded-md border border-line bg-panel px-3 py-2 text-sm text-bone" placeholder="NFL team" value={pickTeam} onChange={(e) => setPickTeam(e.target.value)} />
+                      </div>
+                    </>
+                  )}
+
                   <button disabled={submitting} onClick={submitPick} className="mt-3 rounded-md bg-teal px-4 py-2 text-xs font-bold uppercase tracking-wide text-ink disabled:opacity-50">
                     {submitting ? "Saving..." : "Submit Pick"}
                   </button>
@@ -533,7 +595,7 @@ function CommissionerNoDraft({ owners, season, onChange }: { owners: Owner[]; se
     const { error } = await supabase.from("drafts").insert({
       season_id: season.id,
       draft_order: owners.map((o) => o.id),
-      rounds: 17,
+      rounds: 16,
       status: "setup",
     });
     setMsg(error ? `Error: ${error.message}` : "");

@@ -8,7 +8,65 @@ import { teamLogoUrl } from "@/lib/teamLogo";
 
 const ROSTER_SLOTS = ["QB", "RB", "RB", "WR", "WR", "TE", "FLEX", "FLEX", "K", "DEF"];
 const FLEX_POSITIONS = ["RB", "WR", "TE"];
+const TEAM_BYES: Record<string, number> = {
+  ARI: 14, ATL: 11, BAL: 13, BUF: 7, CAR: 5, CHI: 10, CIN: 6, CLE: 11,
+  DAL: 14, DEN: 10, DET: 6, GB: 11, HOU: 8, IND: 13, JAX: 7, KC: 5,
+  LAC: 7, LAR: 11, LV: 13, MIA: 6, MIN: 6, NE: 11, NO: 8, NYG: 8,
+  NYJ: 13, PHI: 10, PIT: 9, SEA: 11, SF: 8, TB: 10, TEN: 9, WAS: 7,
+};
 
+async function syncPoolFromSleeper(seasonYear: string) {
+  const res = await fetch("https://api.sleeper.app/v1/players/nfl");
+  if (!res.ok) throw new Error("Sleeper API request failed.");
+  const all: Record<string, any> = await res.json();
+
+  const rows: {
+    season_year: string; name: string; position: string; nfl_team: string;
+    rank: number; adp: number; bye_week: number | null; drafted: boolean;
+  }[] = [];
+
+  for (const id in all) {
+    const p = all[id];
+    if (!p.team || !TEAM_BYES[p.team]) continue;
+    if (!["QB", "RB", "WR", "TE", "K"].includes(p.position)) continue;
+    if (p.status !== "Active") continue;
+    if (!p.search_rank || p.search_rank >= 9999999 || p.search_rank > 400) continue;
+    rows.push({
+      season_year: seasonYear,
+      name: p.full_name,
+      position: p.position,
+      nfl_team: p.team,
+      rank: p.search_rank,
+      adp: p.search_rank,
+      bye_week: TEAM_BYES[p.team] ?? null,
+      drafted: false,
+    });
+  }
+
+  for (const team of Object.keys(TEAM_BYES)) {
+    rows.push({
+      season_year: seasonYear,
+      name: `${team} Defense`,
+      position: "DEF",
+      nfl_team: team,
+      rank: 9000,
+      adp: 9000,
+      bye_week: TEAM_BYES[team],
+      drafted: false,
+    });
+  }
+
+  rows.sort((a, b) => a.rank - b.rank);
+  rows.forEach((r, i) => { r.rank = i + 1; r.adp = i + 1; });
+
+  await supabase.from("draft_players").delete().eq("season_year", seasonYear);
+  for (let i = 0; i < rows.length; i += 200) {
+    const chunk = rows.slice(i, i + 200);
+    const { error } = await supabase.from("draft_players").insert(chunk);
+    if (error) throw new Error(error.message);
+  }
+  return rows.length;
+}
 export default function DraftPage() {
   const [owners, setOwners] = useState<Owner[]>([]);
   const [seasons, setSeasons] = useState<Season[]>([]);
@@ -723,6 +781,10 @@ function CommissionerSetup({
               <h3 className="mb-2 text-sm font-semibold uppercase tracking-widest text-teal">Add to Player Pool</h3>
               <p className="mb-2 text-xs text-mute">One per line: <code>Name, Position, Team</code>. Already loaded with a starter pool — only add if you want more.</p>
               <textarea className={inputCls} rows={3} value={poolText} onChange={(e) => setPoolText(e.target.value)} placeholder={"Ja'Marr Chase, WR, CIN"} />
+            </div><div>
+              <h3 className="mb-2 text-sm font-semibold uppercase tracking-widest text-teal">Sync Player Pool from Sleeper</h3>
+              <p className="mb-2 text-xs text-mute">Pulls live, current NFL rosters/teams/positions from Sleeper&apos;s free public database — this replaces the entire pool below with fresh data. Safe to re-run any time during the season.</p>
+              <SyncPoolButton seasonYear={season.year} onDone={onChange} />
             </div>
             <div className="flex flex-wrap gap-3">
               <button disabled={busy} onClick={save} className="rounded-md bg-teal px-4 py-2 text-xs font-bold uppercase tracking-wide text-ink disabled:opacity-50">Save Setup</button>
@@ -893,7 +955,33 @@ function DraftHistoryTab({ owners, seasons }: { owners: Owner[]; seasons: Season
             </div>
           )}
           <DraftBoard draft={draft} owners={owners} ownerMap={ownerMap} pickMap={pickMap} />
-        </>
+        </>function SyncPoolButton({ seasonYear, onDone }: { seasonYear: string; onDone: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  async function run() {
+    if (!confirm("This replaces the entire player pool with fresh data from Sleeper. Continue?")) return;
+    setBusy(true);
+    setMsg("");
+    try {
+      const count = await syncPoolFromSleeper(seasonYear);
+      setMsg(`Synced ${count} players from Sleeper.`);
+      onDone();
+    } catch (e: any) {
+      setMsg(`Error: ${e.message}`);
+    }
+    setBusy(false);
+  }
+
+  return (
+    <div>
+      <button disabled={busy} onClick={run} className="rounded-md bg-gold px-4 py-2 text-xs font-bold uppercase tracking-wide text-ink disabled:opacity-50">
+        {busy ? "Syncing..." : "Sync Pool from Sleeper"}
+      </button>
+      {msg && <p className="mt-2 text-sm text-teal">{msg}</p>}
+    </div>
+  );
+}
       )}
     </div>
   );

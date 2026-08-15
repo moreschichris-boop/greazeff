@@ -278,7 +278,11 @@ function LiveDraftTab({ owners, season }: { owners: Owner[]; season: Season }) {
     if (error) { setSubmitting(false); return setPickMsg(`Error: ${error.message}`); }
     if (matched) await supabase.from("draft_players").update({ drafted: true }).eq("id", matched.id);
 
-    const nextPick = draft.current_pick + 1;
+    // Advance to the next OPEN pick, skipping any slots already filled (e.g. by keepers).
+    const takenSet = new Set(picks.map((p) => p.pick_number));
+    takenSet.add(draft.current_pick);
+    let nextPick = draft.current_pick + 1;
+    while (takenSet.has(nextPick) && nextPick <= totalPickCount) nextPick++;
     const newStatus = nextPick > totalPickCount ? "complete" : "in_progress";
     await supabase.from("drafts").update({ current_pick: nextPick, status: newStatus }).eq("id", draft.id);
 

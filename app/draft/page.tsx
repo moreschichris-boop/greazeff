@@ -73,7 +73,7 @@ export default function DraftPage() {
   const [owners, setOwners] = useState<Owner[]>([]);
   const [seasons, setSeasons] = useState<Season[]>([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<"live" | "history">("live");
+  const [tab, setTab] = useState<"live" | "history">("history");
 
   useEffect(() => {
     (async () => {
@@ -93,7 +93,6 @@ export default function DraftPage() {
     <div>
       <h1 className="font-display text-4xl tracking-wide text-bone">Draft</h1>
       <div className="mt-4 mb-8 flex gap-2">
-        <TabButton active={tab === "live"} onClick={() => setTab("live")}>Live Draft</TabButton>
         <TabButton active={tab === "history"} onClick={() => setTab("history")}>Draft History</TabButton>
       </div>
 

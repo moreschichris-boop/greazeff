@@ -11,7 +11,7 @@ const grades: TeamGrade[] = [
     team: "Cock Bowers",
     owner: "Chris Moreschi",
     grade: "A",
-  score: 96.5
+  score: 96.5,
     blurb:
       "Saquon Barkley and A.J. Brown to open, then two elite keepers in Jaxon Smith-Njigba and Brock Bowers land at prices most of the league would kill for. This is the deepest 1-4 punch in the draft.",
     prediction: "Championship-caliber top end — the question is bench depth if injuries hit.",

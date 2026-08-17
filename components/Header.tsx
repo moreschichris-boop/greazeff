@@ -7,13 +7,14 @@ import SquidMark from "./SquidMark";
 const links = [
   { href: "/", label: "Home" },
   { href: "/draft", label: "Draft" },
-  { href: "/squid-race", label: "Squid Race" },
+  { href: "/draft-grades", label: "Draft Grades" },
   { href: "/finances", label: "Finances" },
   { href: "/parlay", label: "Parlay" },
   { href: "/rosters", label: "Rosters" },
   { href: "/records", label: "Records" },
   { href: "/owners", label: "Owners" },
   { href: "/gallery", label: "Gallery" },
+  { href: "/rules", label: "Rules" },
 ];
 
 export default function Header() {

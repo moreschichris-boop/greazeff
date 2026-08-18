@@ -105,20 +105,37 @@ export default function RostersPage() {
 
       {entries.length === 0 && <p className="text-mute">No roster entered for this season yet.</p>}
 
-      <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-6 xl:grid-cols-2">
         {owners.map((o) => {
           const list = byOwner.get(o.id);
           if (!list || list.length === 0) return null;
           const slots = buildLineup(list);
 
+                   const starters = slots.slice(0, ROSTER_SLOTS.length);
+          const bench = slots.slice(ROSTER_SLOTS.length);
+
           return (
             <div key={o.id} className="stat-card rounded-xl p-5">
               <h2 className="font-display text-xl text-bone">{o.name}</h2>
               <div className="divider-tentacle my-3" />
-              <div className="space-y-1.5">
-                {slots.map((s, i) => (
-                  <LineupRow key={i} label={s.label} entry={s.entry} headshots={headshots} />
-                ))}
+              <div className="grid gap-x-6 sm:grid-cols-2">
+                <div>
+                  <div className="mb-2 text-xs font-semibold uppercase tracking-widest text-teal">Starters</div>
+                  <div className="space-y-1.5">
+                    {starters.map((s, i) => (
+                      <LineupRow key={i} label={s.label} entry={s.entry} headshots={headshots} />
+                    ))}
+                  </div>
+                </div>
+                <div className="mt-5 sm:mt-0">
+                  <div className="mb-2 text-xs font-semibold uppercase tracking-widest text-mute">Bench</div>
+                  <div className="space-y-1.5">
+                    {bench.map((s, i) => (
+                      <LineupRow key={i} label={s.label} entry={s.entry} headshots={headshots} />
+                    ))}
+                    {bench.length === 0 && <p className="text-xs text-mute/50">No bench players.</p>}
+                  </div>
+                </div>
               </div>
             </div>
           );

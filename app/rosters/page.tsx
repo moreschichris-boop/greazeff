@@ -101,6 +101,11 @@ export default function RostersPage() {
         </select>
       </div>
       <p className="mt-2 text-mute">Final lineups and keeper eligibility, year by year.</p>
+      <p className="mt-1 text-xs text-mute">
+        <span className="mr-1 inline-block h-2.5 w-2.5 rounded-full bg-gold align-middle" /> Keeping &nbsp;
+        <span className="mr-1 inline-block h-2.5 w-2.5 rounded-full bg-teal align-middle" /> Eligible &nbsp;
+        <span className="mr-1 inline-block h-2.5 w-2.5 rounded-full bg-line align-middle" /> Not eligible &nbsp;— tap a dot for details.
+      </p>
       <div className="divider-tentacle my-6" />
 
       {entries.length === 0 && <p className="text-mute">No roster entered for this season yet.</p>}
@@ -154,6 +159,8 @@ function LineupRow({
   entry: RosterEntry | null;
   headshots: Map<string, string>;
 }) {
+  const [showDetail, setShowDetail] = useState(false);
+
   if (!entry) {
     return (
       <div className="flex items-center gap-3 rounded-lg border border-line/60 px-3 py-2 text-sm">
@@ -166,43 +173,47 @@ function LineupRow({
   const headshotUrl = headshots.get(entry.player_name.toLowerCase());
   const logoUrl = teamLogoUrl(entry.nfl_team);
 
+  const dotColor = entry.keeper_selected ? "bg-gold" : entry.keeper_eligible ? "bg-teal" : "bg-line";
+  const detailText = entry.keeper_selected
+    ? `Keeping — Round ${entry.keeper_round ?? "—"}${entry.is_free_agent ? " (FA)" : ""}`
+    : entry.keeper_eligible
+    ? `Eligible — Round ${entry.keeper_round ?? "—"}${entry.is_free_agent ? " (FA)" : ""}`
+    : "Not keeper eligible";
+
   return (
-    <div className="flex items-start gap-3 rounded-lg border border-line/60 px-3 py-2 text-sm">
-      <span className="w-9 shrink-0 pt-1 text-xs font-bold uppercase tracking-wide text-mute">{label}</span>
-      <div className="relative mt-0.5 shrink-0">
-        {headshotUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={headshotUrl}
-            alt=""
-            className="h-9 w-9 rounded-full bg-panel object-cover"
-            onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-          />
-        ) : (
-          <div className="h-9 w-9 rounded-full bg-panel" />
-        )}
-        {logoUrl && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={logoUrl} alt="" className="absolute -bottom-1 -right-1 h-4 w-4 rounded-full border border-ink bg-ink" />
-        )}
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="truncate font-semibold text-bone">{entry.player_name}</div>
-        <div className="text-xs text-mute">{[entry.position, entry.nfl_team].filter(Boolean).join(" · ")}</div>
-        <div className="mt-1">
-          {entry.keeper_selected ? (
-            <span className="inline-block rounded bg-gold/20 px-2 py-0.5 text-[10px] font-semibold text-gold">
-              Keeping — Rd {entry.keeper_round ?? "—"}{entry.is_free_agent ? " (FA)" : ""}
-            </span>
-          ) : entry.keeper_eligible ? (
-            <span className="inline-block rounded bg-teal/15 px-2 py-0.5 text-[10px] font-semibold text-teal">
-              Eligible: Rd {entry.keeper_round ?? "—"}{entry.is_free_agent ? " (FA)" : ""}
-            </span>
+    <div className="rounded-lg border border-line/60 px-3 py-2 text-sm">
+      <div className="flex items-center gap-3">
+        <span className="w-9 shrink-0 text-xs font-bold uppercase tracking-wide text-mute">{label}</span>
+        <div className="relative shrink-0">
+          {headshotUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={headshotUrl}
+              alt=""
+              className="h-9 w-9 rounded-full bg-panel object-cover"
+              onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+            />
           ) : (
-            <span className="inline-block rounded bg-line px-2 py-0.5 text-[10px] text-mute">Not eligible</span>
+            <div className="h-9 w-9 rounded-full bg-panel" />
+          )}
+          {logoUrl && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={logoUrl} alt="" className="absolute -bottom-1 -right-1 h-4 w-4 rounded-full border border-ink bg-ink" />
           )}
         </div>
+        <div className="min-w-0 flex-1">
+          <div className="truncate font-semibold text-bone">{entry.player_name}</div>
+          <div className="text-xs text-mute">{[entry.position, entry.nfl_team].filter(Boolean).join(" · ")}</div>
+        </div>
+        <button
+          onClick={() => setShowDetail((v) => !v)}
+          className={`h-2.5 w-2.5 shrink-0 rounded-full ${dotColor}`}
+          aria-label="Keeper eligibility"
+        />
       </div>
+      {showDetail && (
+        <div className="mt-1.5 pl-12 text-xs text-mute">{detailText}</div>
+      )}
     </div>
   );
 }

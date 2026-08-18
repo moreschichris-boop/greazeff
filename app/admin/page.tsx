@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { supabase, Owner, Season, SeasonResult, RecordEntry, Photo, Draft, DraftPlayer, DraftPick, RosterEntry, FinanceEntry, SeasonPayout, SeasonCost, WeeklyResult } from "@/lib/supabase";
 import { sha256, markAdminSession, hasAdminSession, clearAdminSession } from "@/lib/auth";
 import { teamOrderForRound, ownerForPick, totalPicks } from "@/lib/draft";
-import { uploadMedia } from "@/lib/upload";
+import { uploadMedia, uploadImage } from "@/lib/upload";
 
 type Tab = "owners" | "seasons" | "standings" | "rosters" | "draft" | "records" | "photos" | "finances" | "settings";
 

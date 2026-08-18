@@ -70,7 +70,6 @@ export default function GalleryPage() {
             </figcaption>
           </figure>
         ))}
-        ))}
       </div>
     </div>
   );

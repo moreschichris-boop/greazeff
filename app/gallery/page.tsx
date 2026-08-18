@@ -55,16 +55,21 @@ export default function GalleryPage() {
       )}
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
-        {filtered.map((p) => (
+               {filtered.map((p) => (
           <figure key={p.id} className="stat-card overflow-hidden rounded-xl">
             <div className="relative aspect-square w-full">
-              <Image src={p.url} alt={p.caption ?? p.season_year} fill className="object-cover" />
+              {p.media_type === "video" ? (
+                <video src={p.url} controls className="h-full w-full object-cover" />
+              ) : (
+                <Image src={p.url} alt={p.caption ?? p.season_year} fill className="object-cover" />
+              )}
             </div>
             <figcaption className="px-3 py-2 text-xs text-mute">
               <span className="font-semibold text-teal">{p.season_year}</span>
               {p.caption ? ` — ${p.caption}` : ""}
             </figcaption>
           </figure>
+        ))}
         ))}
       </div>
     </div>

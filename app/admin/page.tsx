@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { supabase, Owner, Season, SeasonResult, RecordEntry, Photo, Draft, DraftPlayer, DraftPick, RosterEntry, FinanceEntry, SeasonPayout, SeasonCost, WeeklyResult } from "@/lib/supabase";
 import { sha256, markAdminSession, hasAdminSession, clearAdminSession } from "@/lib/auth";
 import { teamOrderForRound, ownerForPick, totalPicks } from "@/lib/draft";
-import { uploadImage } from "@/lib/upload";
+import { uploadMedia } from "@/lib/upload";
 
 type Tab = "owners" | "seasons" | "standings" | "rosters" | "draft" | "records" | "photos" | "finances" | "settings";
 
@@ -1591,9 +1591,11 @@ function WeeklyResultsSection({
 function PhotosTab() {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [msg, setMsg] = useState("");
-  const [form, setForm] = useState({ season_year: "", url: "", caption: "" });
-  const [file, setFile] = useState<File | null>(null);
+  const [seasonYear, setSeasonYear] = useState("");
+  const [caption, setCaption] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [progress, setProgress] = useState({ done: 0, total: 0 });
 
   async function load() {
     const { data } = await supabase.from("photos").select("*").order("season_year", { ascending: false });
@@ -1601,27 +1603,35 @@ function PhotosTab() {
   }
   useEffect(() => { load(); }, []);
 
-  async function add() {
-    if (!form.season_year || (!form.url && !file)) {
-      setMsg("Season year and either an uploaded photo or an image URL are required.");
+  async function addBatch() {
+    if (!seasonYear || files.length === 0) {
+      setMsg("Season year and at least one file are required.");
       return;
     }
-    let url = form.url;
-    if (file) {
-      setUploading(true);
+    setUploading(true);
+    setProgress({ done: 0, total: files.length });
+    let failCount = 0;
+
+    for (let i = 0; i < files.length; i++) {
       try {
-        url = await uploadImage(file, form.season_year || "misc");
-      } catch (err: any) {
-        setMsg(`Upload failed: ${err.message ?? err}`);
-        setUploading(false);
-        return;
+        const { url, mediaType } = await uploadMedia(files[i], seasonYear);
+        const { error } = await supabase.from("photos").insert({
+          season_year: seasonYear,
+          url,
+          caption: caption || null,
+          media_type: mediaType,
+        });
+        if (error) failCount++;
+      } catch {
+        failCount++;
       }
-      setUploading(false);
+      setProgress((p) => ({ ...p, done: p.done + 1 }));
     }
-    const { error } = await supabase.from("photos").insert({ ...form, url });
-    setMsg(error ? `Error: ${error.message}` : "Added.");
-    setForm({ season_year: "", url: "", caption: "" });
-    setFile(null);
+
+    setUploading(false);
+    setMsg(failCount > 0 ? `Uploaded ${files.length - failCount} of ${files.length} — ${failCount} failed.` : `Uploaded ${files.length} file(s).`);
+    setFiles([]);
+    setCaption("");
     load();
   }
 
@@ -1629,6 +1639,43 @@ function PhotosTab() {
     await supabase.from("photos").delete().eq("id", id);
     load();
   }
+
+  return (
+    <div>
+      <SectionMsg msg={msg} />
+      <div className="stat-card mb-6 grid gap-3 rounded-xl p-4">
+        <input className={inputCls} placeholder="Season year, e.g. 2026-27" value={seasonYear} onChange={(e) => setSeasonYear(e.target.value)} />
+        <input
+          type="file"
+          accept="image/*,video/*"
+          multiple
+          className={`${inputCls} file:mr-3 file:rounded file:border-0 file:bg-teal file:px-3 file:py-1.5 file:text-xs file:font-bold file:uppercase file:text-ink`}
+          onChange={(e) => setFiles(Array.from(e.target.files ?? []))}
+        />
+        {files.length > 0 && <p className="text-xs text-mute">{files.length} file(s) selected</p>}
+        <input className={inputCls} placeholder="Caption (optional, applies to all selected)" value={caption} onChange={(e) => setCaption(e.target.value)} />
+        <button disabled={uploading} onClick={addBatch} className="rounded-md bg-teal px-4 py-2 text-xs font-bold uppercase tracking-wide text-ink disabled:opacity-50">
+          {uploading ? `Uploading ${progress.done}/${progress.total}...` : `Upload ${files.length || ""} File${files.length === 1 ? "" : "s"}`}
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {photos.map((p) => (
+          <div key={p.id} className="stat-card rounded-xl p-2 text-xs">
+            {p.media_type === "video" ? (
+              <video src={p.url} controls className="mb-2 h-24 w-full rounded-md object-cover" />
+            ) : (
+              <img src={p.url} alt={p.caption ?? ""} className="mb-2 h-24 w-full rounded-md object-cover" />
+            )}
+            <div className="text-teal">{p.season_year}</div>
+            <div className="truncate text-mute">{p.caption}</div>
+            <button onClick={() => remove(p.id)} className="mt-1 text-ember">Delete</button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
   return (
     <div>

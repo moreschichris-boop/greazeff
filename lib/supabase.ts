@@ -56,6 +56,7 @@ export type Photo = {
   url: string;
   caption: string | null;
   sort_order: number;
+  media_type: "image" | "video";
 };
 
 export type RosterEntry = {

@@ -105,7 +105,7 @@ export default function RostersPage() {
 
       {entries.length === 0 && <p className="text-mute">No roster entered for this season yet.</p>}
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
         {owners.map((o) => {
           const list = byOwner.get(o.id);
           if (!list || list.length === 0) return null;

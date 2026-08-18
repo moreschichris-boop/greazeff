@@ -148,3 +148,8 @@ function UploadBox({ onDone }: { onDone: () => void }) {
           className="rounded-md bg-teal px-4 py-2 text-xs font-bold uppercase tracking-wide text-ink disabled:opacity-50"
         >
           {uploading ? `Uploading ${progress.done}/${progress.total}...` : `Upload ${files.length || ""} File${files.length === 1 ? "" : "s"}`}
+        </button>
+      </div>
+    </div>
+  );
+}

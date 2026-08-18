@@ -1642,37 +1642,7 @@ function PhotosTab() {
 
   
 
-  return (
-    <div>
-      <SectionMsg msg={msg} />
-      <div className="stat-card mb-6 grid gap-3 rounded-xl p-4 sm:grid-cols-3">
-        <input className={inputCls} placeholder="Season year, e.g. 2024-25" value={form.season_year} onChange={(e) => setForm({ ...form, season_year: e.target.value })} />
-        <input
-          type="file"
-          accept="image/*"
-          className={`${inputCls} file:mr-3 file:rounded file:border-0 file:bg-teal file:px-3 file:py-1.5 file:text-xs file:font-bold file:uppercase file:text-ink`}
-          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-        />
-        <input className={inputCls} placeholder="Caption (optional)" value={form.caption} onChange={(e) => setForm({ ...form, caption: e.target.value })} />
-        <input className={`${inputCls} sm:col-span-3`} placeholder="...or paste an image URL instead of uploading" value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} disabled={!!file} />
-        <button disabled={uploading} onClick={add} className="sm:col-span-3 rounded-md bg-teal px-4 py-2 text-xs font-bold uppercase tracking-wide text-ink disabled:opacity-50">
-          {uploading ? "Uploading..." : "+ Add Photo"}
-        </button>
-      </div>
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        {photos.map((p) => (
-          <div key={p.id} className="stat-card rounded-xl p-2 text-xs">
-            <img src={p.url} alt={p.caption ?? ""} className="mb-2 h-24 w-full rounded-md object-cover" />
-            <div className="text-teal">{p.season_year}</div>
-            <div className="truncate text-mute">{p.caption}</div>
-            <button onClick={() => remove(p.id)} className="mt-1 text-ember">Delete</button>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
 
 /* ---------- Settings ---------- */
 

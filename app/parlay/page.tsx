@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { supabase, Owner, Season, ParlayPick } from "@/lib/supabase";
+import { supabase, Owner, Season, ParlayPick, ParlaySlip } from "@/lib/supabase";
 import { sha256, markAdminSession, hasAdminSession } from "@/lib/auth";
+import { uploadMedia } from "@/lib/upload";
 
 export default function ParlayPage() {
   const [seasons, setSeasons] = useState<Season[]>([]);
@@ -151,6 +152,7 @@ export default function ParlayPage() {
       </div>
 
       {gate}
+            <SlipSummary seasonId={seasonId} week={week} />
 
       <div className="grid gap-3 sm:grid-cols-2">
         {owners.map((o) => {
@@ -287,4 +289,92 @@ function useCommissionerUnlock() {
   ) : null;
 
   return { unlocked, gate };
+}
+
+function SlipSummary({ seasonId, week }: { seasonId: string; week: number }) {
+  const [slip, setSlip] = useState<ParlaySlip | null>(null);
+  const [wager, setWager] = useState("");
+  const [odds, setOdds] = useState("");
+  const [toPay, setToPay] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  async function load() {
+    if (!seasonId) return;
+    const { data } = await supabase.from("parlay_slips").select("*").eq("season_id", seasonId).eq("week", week).maybeSingle();
+    setSlip(data ?? null);
+    setWager(data?.wager != null ? String(data.wager) : "");
+    setOdds(data?.odds ?? "");
+    setToPay(data?.to_pay != null ? String(data.to_pay) : "");
+  }
+  useEffect(() => { load(); setFile(null); setMsg(""); }, [seasonId, week]);
+
+  async function save() {
+    setSaving(true);
+    setMsg("");
+    let photo_url = slip?.photo_url ?? null;
+    if (file) {
+      try {
+        const { url } = await uploadMedia(file, `parlay-${week}`);
+        photo_url = url;
+      } catch (err: any) {
+        setMsg(`Photo upload failed: ${err.message ?? err}`);
+        setSaving(false);
+        return;
+      }
+    }
+    const { error } = await supabase.from("parlay_slips").upsert(
+      {
+        season_id: seasonId,
+        week,
+        wager: wager ? +wager : null,
+        odds: odds || null,
+        to_pay: toPay ? +toPay : null,
+        photo_url,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "season_id,week" }
+    );
+    setSaving(false);
+    if (error) return setMsg(`Error: ${error.message}`);
+    setMsg("Saved!");
+    setFile(null);
+    load();
+  }
+
+  return (
+    <div className="stat-card mb-10 rounded-xl p-5">
+      <h2 className="mb-3 font-display text-lg text-teal">This Week's Slip</h2>
+      {msg && <p className="mb-2 text-sm text-teal">{msg}</p>}
+
+      {slip?.photo_url && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={slip.photo_url} alt="Parlay slip" className="mb-4 max-h-96 rounded-lg border border-line object-contain" />
+      )}
+
+      {(slip?.wager || slip?.odds || slip?.to_pay) && (
+        <div className="mb-4 flex flex-wrap gap-4 text-sm">
+          {slip?.wager != null && <span className="text-mute">Wager: <span className="font-semibold text-bone">${slip.wager}</span></span>}
+          {slip?.odds && <span className="text-mute">Odds: <span className="font-semibold text-bone">{slip.odds}</span></span>}
+          {slip?.to_pay != null && <span className="text-mute">To Pay: <span className="font-semibold text-teal">${slip.to_pay.toLocaleString()}</span></span>}
+        </div>
+      )}
+
+      <div className="grid gap-2 sm:grid-cols-4">
+        <input className="rounded-md border border-line bg-panel px-3 py-2 text-sm text-bone" placeholder="Wager ($)" value={wager} onChange={(e) => setWager(e.target.value)} />
+        <input className="rounded-md border border-line bg-panel px-3 py-2 text-sm text-bone" placeholder="Odds (e.g. +193886)" value={odds} onChange={(e) => setOdds(e.target.value)} />
+        <input className="rounded-md border border-line bg-panel px-3 py-2 text-sm text-bone" placeholder="To Pay ($)" value={toPay} onChange={(e) => setToPay(e.target.value)} />
+        <input
+          type="file"
+          accept="image/*"
+          className="rounded-md border border-line bg-panel px-2 py-1.5 text-xs text-bone file:mr-2 file:rounded file:border-0 file:bg-teal file:px-2 file:py-1 file:text-[10px] file:font-bold file:uppercase file:text-ink"
+          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+        />
+      </div>
+      <button disabled={saving} onClick={save} className="mt-3 rounded-md bg-teal px-4 py-2 text-xs font-bold uppercase tracking-wide text-ink disabled:opacity-50">
+        {saving ? "Saving..." : "Save Slip"}
+      </button>
+    </div>
+  );
 }

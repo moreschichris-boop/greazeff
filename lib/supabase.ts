@@ -125,6 +125,17 @@ export type ParlayPick = {
   result: "pending" | "win" | "loss" | "push";
 };
 
+export type ParlaySlip = {
+  id: string;
+  season_id: string;
+  week: number;
+  wager: number | null;
+  odds: string | null;
+  to_pay: number | null;
+  photo_url: string | null;
+  updated_at: string;
+};
+
 export type Draft = {
   id: string;
   season_id: string;

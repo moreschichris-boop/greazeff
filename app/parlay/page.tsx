@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { supabase, Owner, Season, ParlayPick } from "@/lib/supabase";
+import { sha256, markAdminSession, hasAdminSession } from "@/lib/auth";
 
 export default function ParlayPage() {
   const [seasons, setSeasons] = useState<Season[]>([]);
@@ -9,6 +10,7 @@ export default function ParlayPage() {
   const [seasonId, setSeasonId] = useState("");
   const [week, setWeek] = useState(1);
   const [picks, setPicks] = useState<ParlayPick[]>([]);
+  const [seasonPicks, setSeasonPicks] = useState<ParlayPick[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [whoAmI, setWhoAmI] = useState("");
@@ -16,6 +18,8 @@ export default function ParlayPage() {
   const [odds, setOdds] = useState("");
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
+
+  const { unlocked, gate } = useCommissionerUnlock();
 
   useEffect(() => {
     (async () => {
@@ -35,17 +39,25 @@ export default function ParlayPage() {
   }
   useEffect(() => { loadPicks(); }, [seasonId, week]);
 
+  async function loadSeasonPicks() {
+    if (!seasonId) return;
+    const { data } = await supabase.from("parlay_picks").select("*").eq("season_id", seasonId);
+    setSeasonPicks(data ?? []);
+  }
+  useEffect(() => { loadSeasonPicks(); }, [seasonId]);
+
   const ownerMap = useMemo(() => new Map(owners.map((o) => [o.id, o])), [owners]);
   const pickMap = useMemo(() => new Map(picks.map((p) => [p.owner_id, p])), [picks]);
   const submittedCount = picks.length;
 
-  // Realtime: everyone's screen updates as picks come in.
+  // Realtime: everyone's screen updates as picks + results come in.
   useEffect(() => {
     if (!seasonId) return;
     const channel = supabase
       .channel(`parlay-${seasonId}-${week}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "parlay_picks", filter: `season_id=eq.${seasonId}` }, () => {
         loadPicks();
+        loadSeasonPicks();
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
@@ -73,6 +85,24 @@ export default function ParlayPage() {
     setMsg("Saved!");
     loadPicks();
   }
+
+  async function setResult(pickId: string, result: "pending" | "win" | "loss" | "push") {
+    await supabase.from("parlay_picks").update({ result }).eq("id", pickId);
+    loadPicks();
+    loadSeasonPicks();
+  }
+
+  // Season-long record per owner, across every week.
+  const seasonRecords = useMemo(() => {
+    const map = new Map<string, { win: number; loss: number; push: number }>();
+    for (const o of owners) map.set(o.id, { win: 0, loss: 0, push: 0 });
+    for (const p of seasonPicks) {
+      if (p.result === "pending") continue;
+      const rec = map.get(p.owner_id);
+      if (rec) rec[p.result]++;
+    }
+    return map;
+  }, [seasonPicks, owners]);
 
   if (loading) return <p className="text-mute">Loading...</p>;
 
@@ -120,24 +150,141 @@ export default function ParlayPage() {
         </button>
       </div>
 
+      {gate}
+
       <div className="grid gap-3 sm:grid-cols-2">
         {owners.map((o) => {
           const p = pickMap.get(o.id);
           return (
-            <div key={o.id} className="stat-card flex items-center justify-between rounded-xl p-4">
-              <div>
-                <div className="font-semibold text-bone">{o.name}</div>
-                {p ? (
-                  <div className="text-sm text-teal">{p.pick}{p.odds ? ` (${p.odds})` : ""}</div>
-                ) : (
-                  <div className="text-sm text-mute">Not submitted yet</div>
-                )}
+            <div key={o.id} className="stat-card rounded-xl p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="font-semibold text-bone">{o.name}</div>
+                  {p ? (
+                    <div className="truncate text-sm text-teal">{p.pick}{p.odds ? ` (${p.odds})` : ""}</div>
+                  ) : (
+                    <div className="text-sm text-mute">Not submitted yet</div>
+                  )}
+                </div>
+                {p && <ResultBadge result={p.result} />}
               </div>
-              {p && <span className="rounded bg-teal/15 px-2 py-0.5 text-[10px] font-semibold uppercase text-teal">In</span>}
+
+              {p && unlocked && (
+                <div className="mt-3 flex gap-2">
+                  <ResultButton label="Win" active={p.result === "win"} onClick={() => setResult(p.id, "win")} color="teal" />
+                  <ResultButton label="Loss" active={p.result === "loss"} onClick={() => setResult(p.id, "loss")} color="ember" />
+                  <ResultButton label="Push" active={p.result === "push"} onClick={() => setResult(p.id, "push")} color="gold" />
+                  {p.result !== "pending" && (
+                    <ResultButton label="Reset" active={false} onClick={() => setResult(p.id, "pending")} color="mute" />
+                  )}
+                </div>
+              )}
             </div>
           );
         })}
       </div>
+
+      <h2 className="mt-12 font-display text-2xl tracking-wide text-bone">Season Record</h2>
+      <div className="divider-tentacle my-4" />
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[500px] border-collapse text-sm">
+          <thead>
+            <tr className="border-b border-line text-left text-xs uppercase tracking-widest text-mute">
+              <th className="py-2">Owner</th>
+              <th>Wins</th>
+              <th>Losses</th>
+              <th>Pushes</th>
+            </tr>
+          </thead>
+          <tbody>
+            {owners.map((o) => {
+              const rec = seasonRecords.get(o.id) ?? { win: 0, loss: 0, push: 0 };
+              return (
+                <tr key={o.id} className="border-b border-line/60">
+                  <td className="py-2 text-bone">{o.name}</td>
+                  <td className="text-teal">{rec.win}</td>
+                  <td className="text-ember">{rec.loss}</td>
+                  <td className="text-gold">{rec.push}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
+}
+
+function ResultBadge({ result }: { result: "pending" | "win" | "loss" | "push" }) {
+  if (result === "pending") return <span className="shrink-0 rounded bg-line px-2 py-0.5 text-[10px] font-semibold uppercase text-mute">Pending</span>;
+  if (result === "win") return <span className="shrink-0 rounded bg-teal/15 px-2 py-0.5 text-[10px] font-semibold uppercase text-teal">Win</span>;
+  if (result === "loss") return <span className="shrink-0 rounded bg-ember/15 px-2 py-0.5 text-[10px] font-semibold uppercase text-ember">Loss</span>;
+  return <span className="shrink-0 rounded bg-gold/15 px-2 py-0.5 text-[10px] font-semibold uppercase text-gold">Push</span>;
+}
+
+function ResultButton({
+  label,
+  active,
+  onClick,
+  color,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+  color: "teal" | "ember" | "gold" | "mute";
+}) {
+  const activeClasses: Record<string, string> = {
+    teal: "bg-teal text-ink",
+    ember: "bg-ember text-ink",
+    gold: "bg-gold text-ink",
+    mute: "border border-line text-mute",
+  };
+  return (
+    <button
+      onClick={onClick}
+      className={`rounded px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide ${
+        active ? activeClasses[color] : "border border-line text-mute hover:text-bone"
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
+
+function useCommissionerUnlock() {
+  const [unlocked, setUnlocked] = useState(false);
+  const [pin, setPin] = useState("");
+  const [error, setError] = useState("");
+  const [checking, setChecking] = useState(false);
+
+  useEffect(() => { setUnlocked(hasAdminSession()); }, []);
+
+  async function submit() {
+    setChecking(true);
+    setError("");
+    const { data } = await supabase.from("app_settings").select("value").eq("key", "admin_pin_hash").single();
+    const hash = await sha256(pin);
+    if (data?.value === hash) {
+      markAdminSession();
+      setUnlocked(true);
+    } else {
+      setError("Incorrect PIN.");
+    }
+    setChecking(false);
+  }
+
+  const gate = !unlocked ? (
+    <div className="stat-card mb-6 rounded-xl p-4">
+      <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-mute">Enter PIN to mark results (commissioner only)</p>
+      <div className="flex gap-2">
+        <input type="password" inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value)} placeholder="PIN" className="w-32 rounded-md border border-line bg-panel px-3 py-2 text-sm text-bone" />
+        <button disabled={checking} onClick={submit} className="rounded-md bg-teal px-4 py-2 text-xs font-bold uppercase tracking-wide text-ink disabled:opacity-50">
+          {checking ? "..." : "Unlock"}
+        </button>
+      </div>
+      {error && <p className="mt-1 text-xs text-ember">{error}</p>}
+    </div>
+  ) : null;
+
+  return { unlocked, gate };
 }

@@ -122,6 +122,7 @@ export type ParlayPick = {
   pick: string;
   odds: string | null;
   updated_at: string;
+  result: "pending" | "win" | "loss" | "push";
 };
 
 export type Draft = {
